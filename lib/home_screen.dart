@@ -77,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ]),
                 const SizedBox(height: 16),
 
-                _buildPanel('나의 EF수치(막대그래프)', [
+                _buildPanel('나의 암기력(환산수치)', [
                   _buildNumberBox('77,483', '누적 복습', Colors.black87),
                   _buildInfoList(),
                 ]),
