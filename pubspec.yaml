@@ -10,6 +10,12 @@ dependencies:
   flutter:
     sdk: flutter
   shared_preferences: ^2.2.2
+  google_sign_in: ^6.1.5
+  googleapis: ^11.2.0
+  googleapis_auth: ^1.4.1
+  table_calendar: ^3.0.9
+  url_launcher: ^6.2.4
+  http: ^1.1.0
 
 dev_dependencies:
   flutter_test:
