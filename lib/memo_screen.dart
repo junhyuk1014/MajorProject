@@ -47,23 +47,28 @@ class _MemoScreenState extends State<MemoScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
         title: const Text('메모 추가'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '제목',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: contentController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '내용',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
               ),
               maxLines: 5,
             ),
@@ -109,6 +114,7 @@ class _MemoScreenState extends State<MemoScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
         title: Text(memo.title),
         content: SingleChildScrollView(
           child: Column(
@@ -181,23 +187,28 @@ class _MemoScreenState extends State<MemoScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
         title: const Text('메모 수정'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '제목',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: contentController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '내용',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
               ),
               maxLines: 5,
             ),
@@ -242,6 +253,7 @@ class _MemoScreenState extends State<MemoScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
         title: const Text('메모 삭제'),
         content: const Text('정말 이 메모를 삭제하시겠습니까?'),
         actions: [
@@ -277,6 +289,7 @@ class _MemoScreenState extends State<MemoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
         actions: [
           IconButton(
@@ -303,6 +316,7 @@ class _MemoScreenState extends State<MemoScreen> {
               itemBuilder: (context, index) {
                 final memo = _memos[index];
                 return Card(
+                  color: const Color(0xFFF5F5F5),
                   margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: ListTile(
                     title: Text(

@@ -13,8 +13,13 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Spaced Repetition App',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+        useMaterial3: false,
+        scaffoldBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF5F5F5),
+          foregroundColor: Colors.black87,
+        ),
+        dialogBackgroundColor: Colors.white,
       ),
       home: const HomeScreen(),
     );

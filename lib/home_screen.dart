@@ -15,7 +15,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.white,
       body: _getScreenForIndex(_selectedIndex),
       bottomNavigationBar: _buildBottomNavigationBar(),
     );
@@ -92,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildPanel(String title, List<Widget> children, [String subtitle = '']) {
     return Card(
+      color: const Color(0xFFF5F5F5),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -272,6 +273,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return BottomNavigationBar(
       currentIndex: _selectedIndex,
       onTap: (index) => setState(() => _selectedIndex = index),
+      backgroundColor: const Color(0xFFF5F5F5),
+      selectedItemColor: Colors.brown[700],
+      unselectedItemColor: Colors.brown[400],
       type: BottomNavigationBarType.fixed,
       items: const [
         BottomNavigationBarItem(
