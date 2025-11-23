@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'calendar_screen.dart';
+import 'memo_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,68 +16,81 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      body: SafeArea(
-        child: Column(
-          children: [
-            // 상단 제목
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Information',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Statistics',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // 세로 스크롤 패널
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _buildPanel('Information', 'Statistics', [
-                    _buildProgressBar('Views', 0.62, Colors.blue),
-                    _buildProgressBar('Visits', 0.74, Colors.orange),
-                    _buildProgressBar('Purchases', 0.51, Colors.black87),
-                  ]),
-                  const SizedBox(height: 16),
-                  _buildPanel('Analytics', 'Expenses', [
-                    _buildNumberBox('2,541', '복습 횟수', Colors.orange),
-                    _buildCircleRow(['Likes', 'Dislike', 'Comment']),
-                  ]),
-                  const SizedBox(height: 16),
-                  _buildPanel('Profit', 'Information', [
-                    _buildNumberBox('56,321', '총 학습 항목', Colors.blue),
-                    _buildCircleRow(['Donates', 'Subscription', 'Advertising', 'Purchases']),
-                  ]),
-                  const SizedBox(height: 16),
-                  _buildPanel('Saving', '', [
-                    _buildNumberBox('77,483', '누적 복습', Colors.black87),
-                    _buildInfoList(),
-                  ]),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      body: _getScreenForIndex(_selectedIndex),
       bottomNavigationBar: _buildBottomNavigationBar(),
     );
   }
 
-  Widget _buildPanel(String title, String subtitle, List<Widget> children) {
+  Widget _getScreenForIndex(int index) {
+    switch (index) {
+      case 0:
+        return _buildStatisticsScreen();
+      case 1:
+        return const CalendarScreen();
+      case 2:
+        return const MemoScreen();
+      default:
+        return _buildStatisticsScreen();
+    }
+  }
+
+  Widget _buildStatisticsScreen() {
+    return SafeArea(
+      child: Column(
+        children: [
+          // 상단 제목
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Statistics',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // 세로 스크롤 패널
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                _buildPanel('나의 망각 곡선', [
+                  _buildProgressBar('Views', 0.62, Colors.blue),
+                  _buildProgressBar('Visits', 0.74, Colors.orange),
+                  _buildProgressBar('Purchases', 0.51, Colors.black87),
+                ]),
+                const SizedBox(height: 16),
+
+                _buildPanel('가장 많이 망각한 항목(원그래프)',[
+                  _buildNumberBox('2,541', '복습 횟수', Colors.orange),
+                ]),
+                const SizedBox(height: 16),
+
+                _buildPanel('가장 많이 망각한 일정', [
+                  _buildNumberBox('56,321', '총 학습 항목', Colors.blue),
+                ]),
+                const SizedBox(height: 16),
+
+                _buildPanel('나의 EF수치(막대그래프)', [
+                  _buildNumberBox('77,483', '누적 복습', Colors.black87),
+                  _buildInfoList(),
+                ]),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPanel(String title, List<Widget> children, [String subtitle = '']) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -125,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -260,19 +275,19 @@ class _HomeScreenState extends State<HomeScreen> {
       type: BottomNavigationBarType.fixed,
       items: const [
         BottomNavigationBarItem(
-          icon: Icon(Icons.bookmark_border),
-          activeIcon: Icon(Icons.bookmark),
-          label: '북마크',
+          icon: Icon(Icons.home_outlined),
+          activeIcon: Icon(Icons.home),
+          label: '홈',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.chat_bubble_outline),
-          activeIcon: Icon(Icons.chat_bubble),
-          label: '채팅',
+          icon: Icon(Icons.calendar_today_outlined),
+          activeIcon: Icon(Icons.calendar_today),
+          label: '캘린더',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          activeIcon: Icon(Icons.person),
-          label: '프로필',
+          icon: Icon(Icons.note_outlined),
+          activeIcon: Icon(Icons.note),
+          label: '메모',
         ),
       ],
     );

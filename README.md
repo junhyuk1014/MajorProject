@@ -1,6 +1,6 @@
 # major_project
 
-A new Flutter project.
+성진이 기존 main은 test_logic으로 갔음
 
 ## Getting Started
 
