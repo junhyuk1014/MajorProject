@@ -1,6 +1,3 @@
-import 'package:flutter/foundation.dart';
-
-@immutable
 class MemoryItem {
   final String id;
   final String content;
@@ -51,3 +48,4 @@ class MemoryItem {
     );
   }
 }
+

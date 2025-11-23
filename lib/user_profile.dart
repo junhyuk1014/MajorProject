@@ -12,4 +12,5 @@ class UserProfile {
     globalEf = (globalEf * (1.0 - _learningRate)) + (newItemEf * _learningRate);
     globalEf = max(1.3, globalEf);
   }
-} 
+}
+

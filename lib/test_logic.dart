@@ -2,7 +2,7 @@ import 'feedback_module.dart';
 import 'memory_item.dart';
 import 'user_profile.dart';
 
-void main() {
+void testLogic() {
   final feedbackModule = FeedbackModule();
 
   UserProfile user = UserProfile(globalEf: 2.0);
@@ -40,3 +40,4 @@ void main() {
   user.updateUserEf(updatedItemA.ef);
   print('--- 갱신: User Global EF = ${user.globalEf.toStringAsFixed(2)} ---');
 }
+
