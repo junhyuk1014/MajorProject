@@ -26,7 +26,7 @@ class MemoryItem {
       ef: initialEf,
       interval: 0,
       repetitions: 0,
-      nextReviewDate: DateTime.now(),
+      nextReviewDate: DateTime.now().add(const Duration(seconds: 10)),
     );
   }
 
@@ -47,5 +47,26 @@ class MemoryItem {
       nextReviewDate: nextReviewDate ?? this.nextReviewDate,
     );
   }
-}
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'content': content,
+      'ef': ef,
+      'interval': interval,
+      'repetitions': repetitions,
+      'nextReviewDate': nextReviewDate.toIso8601String(),
+    };
+  }
+
+  factory MemoryItem.fromJson(Map<String, dynamic> json) {
+    return MemoryItem(
+      id: json['id'],
+      content: json['content'],
+      ef: (json['ef'] as num).toDouble(),
+      interval: json['interval'],
+      repetitions: json['repetitions'],
+      nextReviewDate: DateTime.parse(json['nextReviewDate']),
+    );
+  }
+}
