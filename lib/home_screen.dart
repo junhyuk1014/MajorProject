@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'calendar_screen.dart';
 import 'memo_screen.dart';
 
@@ -11,6 +12,56 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPermissions();
+    });
+  }
+
+  Future<void> _checkPermissions() async {
+    // 1. 알림 권한 (Android 13+)
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
+
+    // 2. 스케줄 및 리마인더 권한 (Android 12+)
+    var alarmStatus = await Permission.scheduleExactAlarm.status;
+
+    if (alarmStatus.isDenied) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('알림 권한 필요'),
+            content: const Text(
+              '정확한 시간에 복습 알림을 받으려면\n[알람 및 리마인더] 권한이 필요합니다.\n\n설정 화면에서 권한을 허용해 주세요.',
+            ),
+            actions: [
+              TextButton(
+                child: const Text('나중에'),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              ElevatedButton(
+                child: const Text('설정하러 가기'),
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await Permission.scheduleExactAlarm.request();
+                  if (await Permission.scheduleExactAlarm.isDenied) {
+                    await openAppSettings();
+                  }
+                },
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +89,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return SafeArea(
       child: Column(
         children: [
-          // 상단 제목
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -54,8 +104,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          
-          // 세로 스크롤 패널
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -66,17 +114,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildProgressBar('Purchases', 0.51, Colors.black87),
                 ]),
                 const SizedBox(height: 16),
-
                 _buildPanel('가장 많이 망각한 항목(원그래프)',[
                   _buildNumberBox('2,541', '복습 횟수', Colors.orange),
                 ]),
                 const SizedBox(height: 16),
-
                 _buildPanel('가장 많이 망각한 일정', [
                   _buildNumberBox('56,321', '총 학습 항목', Colors.blue),
                 ]),
                 const SizedBox(height: 16),
-
                 _buildPanel('나의 암기력(환산수치)', [
                   _buildNumberBox('77,483', '누적 복습', Colors.black87),
                   _buildInfoList(),
@@ -164,29 +209,6 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCircleRow(List<String> labels) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: labels.map((label) => Column(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _getColorForLabel(label),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(label, style: const TextStyle(fontSize: 10)),
-          ],
-        )).toList(),
       ),
     );
   }
