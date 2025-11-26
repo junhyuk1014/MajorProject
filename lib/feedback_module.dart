@@ -35,7 +35,7 @@ class FeedbackModule {
       }
     }
 
-    DateTime newNextReviewDate = DateTime.now().add(Duration(days: newInterval));
+    DateTime newNextReviewDate = DateTime.now().add(Duration(seconds: newInterval*10));
 
     return item.copyWith(
       ef: newEF,
