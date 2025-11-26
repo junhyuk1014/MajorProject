@@ -6,6 +6,9 @@ import 'package:googleapis/calendar/v3.dart' as cal;
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'calendar_event_model.dart';
+import 'alarm_item.dart';
+import 'user_profile.dart';
+import 'memory_item.dart';
 
 class _AuthenticatedHttpClient extends http.BaseClient {
   final http.Client _inner;
@@ -39,7 +42,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _selectedDay = DateTime.now();
   Map<DateTime, List<CalendarEvent>> _events = {};
   List<CalendarEvent> _selectedEvents = [];
-  
+  final AlarmService _alarmService = AlarmService();
+  final UserProfile _userProfile = UserProfile();
   GoogleSignIn? _googleSignIn;
   GoogleSignInAccount? _currentUser;
   cal.CalendarApi? _calendarApi;
@@ -54,19 +58,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   void _initializeGoogleSignIn() {
-    // serverClientId를 제거하고 strings.xml의 default_web_client_id를 자동으로 사용하도록 함
     _googleSignIn = GoogleSignIn(
       scopes: [
         'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/calendar.events',
       ],
-      // serverClientId를 명시하지 않으면 strings.xml의 default_web_client_id를 자동으로 사용
     );
-    
+
     print('Google Sign In 초기화 완료');
-    print('strings.xml의 default_web_client_id를 사용합니다');
-    
-    // 기존 로그인 상태 확인
+
     _googleSignIn!.onCurrentUserChanged.listen((GoogleSignInAccount? account) {
       if (account != null) {
         _handleSignIn(account);
@@ -79,7 +79,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         });
       }
     });
-    
+
     _checkSignInStatus();
   }
 
@@ -97,12 +97,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     try {
       _currentUser = account;
-      
-      // 인증된 HTTP 클라이언트 생성
-      final authenticatedClient = _AuthenticatedHttpClient(
-        http.Client(),
-        account,
-      );
+      final authenticatedClient = _AuthenticatedHttpClient(http.Client(), account);
 
       setState(() {
         _calendarApi = cal.CalendarApi(authenticatedClient);
@@ -116,84 +111,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
         _isLoading = false;
       });
       if (mounted) {
-        String errorMessage = '로그인 오류: ';
-        if (e.toString().contains('PlatformException') || e.toString().contains('SIGN_IN_REQUIRED')) {
-          errorMessage += '인증 오류가 발생했습니다.\n\n해결 방법:\n1. Google Cloud Console에서 SHA-1 지문 등록 확인\n2. 클라이언트 ID 확인\n3. OAuth 동의 화면 설정 확인\n\nSHA-1: 0F:FB:BF:58:73:D3:85:FE:68:79:C6:F7:EA:02:E5:06:DC:72:DA:25';
-        } else {
-          errorMessage += e.toString();
-        }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            duration: const Duration(seconds: 8),
-          ),
+          SnackBar(content: Text('로그인 오류: $e')),
         );
       }
     }
   }
 
   Future<void> _signIn() async {
-    print('═══════════════════════════════════════');
-    print('로그인 시도 시작...');
-    print('Google Sign In 객체: ${_googleSignIn != null}');
     try {
       final account = await _googleSignIn!.signIn();
-      print('로그인 결과: ${account != null ? "성공 - 계정: ${account.email}" : "취소됨"}');
       if (account != null) {
         await _handleSignIn(account);
       }
     } catch (e) {
-      // 자세한 오류 정보를 콘솔에 출력
-      print('═══════════════════════════════════════');
-      print('Google Sign In 오류 발생!');
-      print('오류 타입: ${e.runtimeType}');
-      print('오류 내용: $e');
-      
-      String errorCode = '';
-      String errorMessage = '';
-      String errorDetails = '';
-      
-      if (e is PlatformException) {
-        errorCode = e.code;
-        errorMessage = e.message ?? '알 수 없는 오류';
-        errorDetails = e.details?.toString() ?? '';
-        print('오류 코드: $errorCode');
-        print('오류 메시지: $errorMessage');
-        print('오류 상세: $errorDetails');
-      } else {
-        errorMessage = e.toString();
-        print('전체 오류: $errorMessage');
-      }
-      print('═══════════════════════════════════════');
-      
       if (mounted) {
-        String userMessage = '로그인 실패: ';
-        String detailMessage = '';
-        
-        if (e is PlatformException) {
-          // ApiException: 10은 DEVELOPER_ERROR를 의미
-          if (errorCode == 'sign_in_failed' || 
-              errorCode == 'SIGN_IN_FAILED' || 
-              errorMessage.contains('ApiException: 10') ||
-              errorMessage.contains('DEVELOPER_ERROR')) {
-            userMessage += '개발자 설정 오류입니다.';
-            detailMessage = '\n\n오류 코드: $errorCode (ApiException: 10)\n\n이 오류는 다음 중 하나의 문제입니다:\n\n1. SHA-1 지문이 Google Cloud Console에 등록되지 않음\n2. 패키지 이름이 일치하지 않음\n3. 클라이언트 ID가 잘못됨\n\n해결 방법:\n\n1. Google Cloud Console 접속:\n   https://console.cloud.google.com\n\n2. API 및 서비스 → 사용자 인증 정보\n\n3. Android 앱 OAuth 클라이언트 ID 클릭\n\n4. 다음 정보 확인/등록:\n   • 패키지 이름: com.example.major_project\n   • SHA-1 지문: 0F:FB:BF:58:73:D3:85:FE:68:79:C6:F7:EA:02:E5:06:DC:72:DA:25\n\n5. 저장 후 몇 분 기다린 뒤 다시 시도';
-          } else if (errorCode == 'network_error' || errorMessage.contains('network')) {
-            userMessage += '네트워크 오류가 발생했습니다.';
-            detailMessage = '\n인터넷 연결을 확인하세요.';
-          } else {
-            userMessage += '플랫폼 오류가 발생했습니다.';
-            detailMessage = '\n\n오류 코드: $errorCode\n오류 메시지: $errorMessage';
-          }
-        } else {
-          userMessage += errorMessage;
-        }
-        
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userMessage + detailMessage),
-            duration: const Duration(seconds: 10),
-          ),
+          SnackBar(content: Text('로그인 실패: $e')),
         );
       }
     }
@@ -209,7 +143,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     });
   }
 
-  // 날짜만 사용하는 DateTime 객체 생성 (시간 제거)
   DateTime _dateOnly(DateTime date) {
     return DateTime(date.year, date.month, date.day);
   }
@@ -237,13 +170,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
       for (var event in events.items ?? []) {
         if (event.start?.dateTime != null || event.start?.date != null) {
-          final startDate = event.start?.dateTime ?? 
+          final startDate = event.start?.dateTime ??
               DateTime.parse(event.start!.date!.toIso8601String());
-          final endDate = event.end?.dateTime ?? 
+          final endDate = event.end?.dateTime ??
               DateTime.parse(event.end!.date!.toIso8601String());
-          
+
           final dateKey = DateTime(startDate.year, startDate.month, startDate.day);
-          
+
           final calendarEvent = CalendarEvent(
             id: event.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
             title: event.summary ?? '(제목 없음)',
@@ -316,22 +249,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
               children: [
                 TextField(
                   controller: titleController,
-                  decoration: InputDecoration(
-                    labelText: '제목',
-                    border: const OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
+                  decoration: const InputDecoration(labelText: '제목', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: descriptionController,
-                  decoration: InputDecoration(
-                    labelText: '설명',
-                    border: const OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
+                  decoration: const InputDecoration(labelText: '설명', border: OutlineInputBorder()),
                   maxLines: 3,
                 ),
                 const SizedBox(height: 16),
@@ -359,13 +282,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       );
                       if (time != null) {
                         setDialogState(() {
-                          startDate = DateTime(
-                            startDate.year,
-                            startDate.month,
-                            startDate.day,
-                            time.hour,
-                            time.minute,
-                          );
+                          startDate = DateTime(startDate.year, startDate.month, startDate.day, time.hour, time.minute);
                         });
                       }
                     },
@@ -383,13 +300,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       );
                       if (time != null) {
                         setDialogState(() {
-                          endDate = DateTime(
-                            endDate.year,
-                            endDate.month,
-                            endDate.day,
-                            time.hour,
-                            time.minute,
-                          );
+                          endDate = DateTime(endDate.year, endDate.month, endDate.day, time.hour, time.minute);
                         });
                       }
                     },
@@ -399,10 +310,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('취소'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
             ElevatedButton(
               onPressed: () {
                 if (titleController.text.trim().isNotEmpty) {
@@ -428,12 +336,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   Future<void> _addEventToGoogle(
-    String title,
-    String? description,
-    DateTime startDate,
-    DateTime endDate,
-    bool isAllDay,
-  ) async {
+      String title,
+      String? description,
+      DateTime startDate,
+      DateTime endDate,
+      bool isAllDay,
+      ) async {
     if (_calendarApi == null) return;
 
     setState(() {
@@ -451,10 +359,21 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ? cal.EventDateTime(date: _dateOnly(endDate))
             : cal.EventDateTime(dateTime: endDate.toUtc());
 
-      await _calendarApi!.events.insert(event, 'primary');
+      final createdEvent = await _calendarApi!.events.insert(event, 'primary');
+      if (createdEvent.id != null) {
+        final localEvent = CalendarEvent(
+          id: createdEvent.id!,
+          title: createdEvent.summary ?? title,
+          description: createdEvent.description,
+          startDate: startDate,
+          endDate: endDate,
+          isAllDay: isAllDay,
+        );
+        await _alarmService.saveEvent(localEvent, _userProfile);
+      }
 
       await _loadEventsFromGoogle();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('일정이 구글 캘린더에 추가되었습니다.')),
@@ -469,6 +388,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
           SnackBar(content: Text('일정 추가 실패: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _handleFeedback(CalendarEvent event, int score) async {
+    await _alarmService.processFeedback('EVENT_${event.id}', score);
+    if (mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$score점 반영 완료!')));
     }
   }
 
@@ -492,24 +419,67 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ],
               const Divider(),
               Text(
-                '시작: ${event.startDate.year}-${event.startDate.month.toString().padLeft(2, '0')}-${event.startDate.day.toString().padLeft(2, '0')} ${event.isAllDay ? '' : '${event.startDate.hour.toString().padLeft(2, '0')}:${event.startDate.minute.toString().padLeft(2, '0')}'}',
+                '시작: ${event.startDate.toString().split('.')[0]}',
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 4),
               Text(
-                '종료: ${event.endDate.year}-${event.endDate.month.toString().padLeft(2, '0')}-${event.endDate.day.toString().padLeft(2, '0')} ${event.isAllDay ? '' : '${event.endDate.hour.toString().padLeft(2, '0')}:${event.endDate.minute.toString().padLeft(2, '0')}'}',
+                '종료: ${event.endDate.toString().split('.')[0]}',
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
+
+              const SizedBox(height: 24),
+
+              // ▼▼▼ [실시간 UI 갱신] ▼▼▼
+              StreamBuilder<void>(
+                  stream: AlarmService.dataUpdateStream.stream,
+                  builder: (context, _) {
+                    return FutureBuilder<MemoryItem?>(
+                      future: _alarmService.getMemoryItem('EVENT_${event.id}'),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData || snapshot.data == null) {
+                          return const SizedBox.shrink();
+                        }
+
+                        final item = snapshot.data!;
+                        final isDue = DateTime.now().isAfter(item.nextReviewDate);
+
+                        if (!isDue) {
+                          return Center(
+                            child: Text(
+                              '✅ 복습 완료\n다음: ${item.nextReviewDate.toString().split('.')[0]}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.blueGrey, fontSize: 13),
+                            ),
+                          );
+                        }
+
+                        return Column(
+                          children: [
+                            const Text('🔔 복습 시간입니다!', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                _buildFeedbackBtn('다시(1)', 1, Colors.red, event),
+                                _buildFeedbackBtn('보통(3)', 3, Colors.blue, event),
+                                _buildFeedbackBtn('완벽(5)', 5, Colors.green, event),
+                              ],
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  }
+              ),
+              // ▲▲▲ ----------------------- ▲▲▲
             ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => _showDeleteConfirmDialog(event, date, eventIndex),
-            child: const Text(
-              '삭제',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('삭제', style: TextStyle(color: Colors.red)),
           ),
           TextButton(
             onPressed: () {
@@ -518,12 +488,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
             },
             child: const Text('수정'),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('닫기'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('닫기')),
         ],
       ),
+    );
+  }
+
+  Widget _buildFeedbackBtn(String text, int score, Color color, CalendarEvent event) {
+    return ElevatedButton(
+      onPressed: () => _handleFeedback(event, score),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color.withOpacity(0.1),
+        foregroundColor: color,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        minimumSize: const Size(0, 36),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 12)),
     );
   }
 
@@ -548,22 +528,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
               children: [
                 TextField(
                   controller: titleController,
-                  decoration: InputDecoration(
-                    labelText: '제목',
-                    border: const OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
+                  decoration: const InputDecoration(labelText: '제목', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: descriptionController,
-                  decoration: InputDecoration(
-                    labelText: '설명',
-                    border: const OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
+                  decoration: const InputDecoration(labelText: '설명', border: OutlineInputBorder()),
                   maxLines: 3,
                 ),
                 const SizedBox(height: 16),
@@ -591,13 +561,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       );
                       if (time != null) {
                         setDialogState(() {
-                          startDate = DateTime(
-                            startDate.year,
-                            startDate.month,
-                            startDate.day,
-                            time.hour,
-                            time.minute,
-                          );
+                          startDate = DateTime(startDate.year, startDate.month, startDate.day, time.hour, time.minute);
                         });
                       }
                     },
@@ -615,13 +579,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       );
                       if (time != null) {
                         setDialogState(() {
-                          endDate = DateTime(
-                            endDate.year,
-                            endDate.month,
-                            endDate.day,
-                            time.hour,
-                            time.minute,
-                          );
+                          endDate = DateTime(endDate.year, endDate.month, endDate.day, time.hour, time.minute);
                         });
                       }
                     },
@@ -631,10 +589,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('취소'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
             ElevatedButton(
               onPressed: () {
                 if (titleController.text.trim().isNotEmpty) {
@@ -661,13 +616,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   Future<void> _updateEventInGoogle(
-    String eventId,
-    String title,
-    String? description,
-    DateTime startDate,
-    DateTime endDate,
-    bool isAllDay,
-  ) async {
+      String eventId,
+      String title,
+      String? description,
+      DateTime startDate,
+      DateTime endDate,
+      bool isAllDay,
+      ) async {
     if (_calendarApi == null) return;
 
     setState(() {
@@ -685,10 +640,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ? cal.EventDateTime(date: _dateOnly(endDate))
             : cal.EventDateTime(dateTime: endDate.toUtc());
 
-      await _calendarApi!.events.update(event, 'primary', eventId);
-
+      final updatedEvent = await _calendarApi!.events.update(event, 'primary', eventId);
+      final localEvent = CalendarEvent(
+        id: eventId,
+        title: title,
+        description: description,
+        startDate: startDate,
+        endDate: endDate,
+        isAllDay: isAllDay,
+      );
+      await _alarmService.saveEvent(localEvent, _userProfile);
       await _loadEventsFromGoogle();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('일정이 수정되었습니다.')),
@@ -714,10 +677,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         title: const Text('일정 삭제'),
         content: const Text('정말 이 일정을 삭제하시겠습니까?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('취소'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('취소')),
           ElevatedButton(
             onPressed: () async {
               Navigator.of(context).pop();
@@ -744,8 +704,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     try {
       await _calendarApi!.events.delete('primary', eventId);
+      await _alarmService.deleteEvent(eventId);
       await _loadEventsFromGoogle();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('일정이 삭제되었습니다.')),
@@ -798,115 +759,115 @@ class _CalendarScreenState extends State<CalendarScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : !_isSignedIn
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.calendar_today, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      const Text(
-                        '구글 캘린더와 연동하려면\n로그인이 필요합니다.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton.icon(
-                        onPressed: _signIn,
-                        icon: const Icon(Icons.login),
-                        label: const Text('구글 로그인'),
-                      ),
-                    ],
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.calendar_today, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              '구글 캘린더와 연동하려면\n로그인이 필요합니다.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _signIn,
+              icon: const Icon(Icons.login),
+              label: const Text('구글 로그인'),
+            ),
+          ],
+        ),
+      )
+          : Column(
+        children: [
+          TableCalendar<CalendarEvent>(
+            firstDay: DateTime.utc(2020, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            calendarFormat: _calendarFormat,
+            eventLoader: _getEventsForDay,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            onDaySelected: _onDaySelected,
+            onFormatChanged: (format) {
+              if (_calendarFormat != format) {
+                setState(() {
+                  _calendarFormat = format;
+                });
+              }
+            },
+            onPageChanged: (focusedDay) {
+              _focusedDay = focusedDay;
+            },
+            calendarStyle: const CalendarStyle(
+              todayDecoration: BoxDecoration(
+                color: Colors.blue,
+                shape: BoxShape.circle,
+              ),
+              selectedDecoration: BoxDecoration(
+                color: Colors.blueAccent,
+                shape: BoxShape.circle,
+              ),
+              markerDecoration: BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+            headerStyle: const HeaderStyle(
+              formatButtonVisible: true,
+              titleCentered: true,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _selectedEvents.isEmpty
+                ? const Center(
+              child: Text(
+                '선택한 날짜에 일정이 없습니다.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            )
+                : ListView.builder(
+              itemCount: _selectedEvents.length,
+              itemBuilder: (context, index) {
+                final event = _selectedEvents[index];
+                return Card(
+                  color: const Color(0xFFF5F5F5),
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: ListTile(
+                    title: Text(
+                      event.title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (event.description != null && event.description!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            event.description!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const SizedBox(height: 4),
+                        Text(
+                          event.isAllDay
+                              ? '하루 종일'
+                              : '${event.startDate.hour.toString().padLeft(2, '0')}:${event.startDate.minute.toString().padLeft(2, '0')} - ${event.endDate.hour.toString().padLeft(2, '0')}:${event.endDate.minute.toString().padLeft(2, '0')}',
+                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    onTap: () => _showEventDetail(event, _selectedDay),
                   ),
-                )
-              : Column(
-                  children: [
-                    TableCalendar<CalendarEvent>(
-                      firstDay: DateTime.utc(2020, 1, 1),
-                      lastDay: DateTime.utc(2030, 12, 31),
-                      focusedDay: _focusedDay,
-                      calendarFormat: _calendarFormat,
-                      eventLoader: _getEventsForDay,
-                      startingDayOfWeek: StartingDayOfWeek.monday,
-                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                      onDaySelected: _onDaySelected,
-                      onFormatChanged: (format) {
-                        if (_calendarFormat != format) {
-                          setState(() {
-                            _calendarFormat = format;
-                          });
-                        }
-                      },
-                      onPageChanged: (focusedDay) {
-                        _focusedDay = focusedDay;
-                      },
-                      calendarStyle: const CalendarStyle(
-                        todayDecoration: BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        selectedDecoration: BoxDecoration(
-                          color: Colors.blueAccent,
-                          shape: BoxShape.circle,
-                        ),
-                        markerDecoration: BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      headerStyle: const HeaderStyle(
-                        formatButtonVisible: true,
-                        titleCentered: true,
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Expanded(
-                      child: _selectedEvents.isEmpty
-                          ? const Center(
-                              child: Text(
-                                '선택한 날짜에 일정이 없습니다.',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: _selectedEvents.length,
-                              itemBuilder: (context, index) {
-                                final event = _selectedEvents[index];
-                                return Card(
-                                  color: const Color(0xFFF5F5F5),
-                                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  child: ListTile(
-                                    title: Text(
-                                      event.title,
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    subtitle: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        if (event.description != null && event.description!.isNotEmpty) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            event.description!,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          event.isAllDay
-                                              ? '하루 종일'
-                                              : '${event.startDate.hour.toString().padLeft(2, '0')}:${event.startDate.minute.toString().padLeft(2, '0')} - ${event.endDate.hour.toString().padLeft(2, '0')}:${event.endDate.minute.toString().padLeft(2, '0')}',
-                                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                        ),
-                                      ],
-                                    ),
-                                    onTap: () => _showEventDetail(event, _selectedDay),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
