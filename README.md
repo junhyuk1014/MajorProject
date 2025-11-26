@@ -1,6 +1,6 @@
 # major_project
 
-성진이 기존 main은 test_logic으로 갔음
+생성된 메모/캘린더 일정에 시간 계산 및 알림 기능추가
 
 ## Getting Started
 
