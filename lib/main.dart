@@ -2,26 +2,26 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+    runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+    const MyApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Spaced Repetition App',
-      theme: ThemeData(
-        useMaterial3: false,
-        scaffoldBackgroundColor: Colors.white,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF5F5F5),
-          foregroundColor: Colors.black87,
-        ),
-        dialogBackgroundColor: Colors.white,
-      ),
-      home: const HomeScreen(),
-    );
-  }
+    @override
+    Widget build(BuildContext context) {
+        return MaterialApp(
+            title: 'Spaced Repetition App',
+            theme: ThemeData(
+            useMaterial3: false,
+            scaffoldBackgroundColor: Colors.white,
+            appBarTheme: const AppBarTheme(
+                backgroundColor: Color(0xFFF5F5F5),
+                foregroundColor: Colors.black87,
+            ),
+            dialogBackgroundColor: Colors.white,
+            ),
+            home: const HomeScreen(),
+        );
+    }
 }
