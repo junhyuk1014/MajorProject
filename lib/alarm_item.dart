@@ -21,7 +21,10 @@ void notificationTapBackground(NotificationResponse response) {
 
 @pragma('vm:entry-point')
 Future<void> handleFeedback(NotificationResponse response) async {
-  await AlarmService().processFeedback(response.payload, int.tryParse(response.actionId ?? ''));
+  await AlarmService().processFeedback(
+    response.payload,
+    int.tryParse(response.actionId ?? ''),
+  );
 }
 
 class MemoryConverter {
@@ -34,9 +37,12 @@ class MemoryConverter {
     );
   }
 
-  static MemoryItem fromCalendarEvent(CalendarEvent event, UserProfile userProfile) {
-    final String dateStr = "${event.startDate.month}/${event.startDate.day} ${event.startDate.hour}:${event.startDate.minute}";
-    final String combinedContent = "[일정] ${event.title}\n($dateStr) ${event.description ?? ''}";
+  static MemoryItem fromCalendarEvent(
+      CalendarEvent event, UserProfile userProfile) {
+    final String dateStr =
+        "${event.startDate.month}/${event.startDate.day} ${event.startDate.hour}:${event.startDate.minute}";
+    final String combinedContent =
+        "[일정] ${event.title}\n($dateStr) ${event.description ?? ''}";
     return MemoryItem.initial(
       id: 'EVENT_${event.id}',
       content: combinedContent,
@@ -48,7 +54,8 @@ class MemoryConverter {
 class AlarmService {
   static const String _storageKey = 'memory_items';
 
-  static final StreamController<void> dataUpdateStream = StreamController.broadcast();
+  static final StreamController<void> dataUpdateStream =
+  StreamController.broadcast();
 
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
   FlutterLocalNotificationsPlugin();
@@ -61,10 +68,12 @@ class AlarmService {
     tz.initializeTimeZones();
 
     try {
-      final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+      // flutter_timezone 5.x : TimezoneInfo.identifier 사용
+      final tzInfo = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = tzInfo.identifier;
       tz.setLocalLocation(tz.getLocation(timeZoneName));
     } catch (e) {
-      print('타임존 설정 실패: $e');
+      debugPrint('타임존 설정 실패: $e');
     }
 
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -117,7 +126,8 @@ class AlarmService {
     const AndroidInitializationSettings initializationSettingsAndroid =
     AndroidInitializationSettings('@mipmap/ic_launcher');
     await flutterLocalNotificationsPlugin.initialize(
-        const InitializationSettings(android: initializationSettingsAndroid));
+      const InitializationSettings(android: initializationSettingsAndroid),
+    );
 
     await flutterLocalNotificationsPlugin.cancel(itemId.hashCode);
 
@@ -125,9 +135,8 @@ class AlarmService {
     await prefs.reload();
 
     final jsonList = prefs.getStringList(_storageKey) ?? [];
-    List<MemoryItem> items = jsonList
-        .map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr)))
-        .toList();
+    List<MemoryItem> items =
+    jsonList.map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr))).toList();
 
     final int index = items.indexWhere((item) => item.id == itemId);
     if (index == -1) {
@@ -153,9 +162,13 @@ class AlarmService {
 
     tz.initializeTimeZones();
     try {
-      final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+      // 여기서도 동일하게 identifier 사용
+      final tzInfo = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = tzInfo.identifier;
       tz.setLocalLocation(tz.getLocation(timeZoneName));
-    } catch (e) { print(e); }
+    } catch (e) {
+      debugPrint('타임존 재설정 실패: $e');
+    }
 
     if (updatedItem.nextReviewDate.isAfter(DateTime.now())) {
       await flutterLocalNotificationsPlugin.zonedSchedule(
@@ -171,16 +184,31 @@ class AlarmService {
             importance: Importance.max,
             priority: Priority.high,
             actions: <AndroidNotificationAction>[
-              AndroidNotificationAction('1', '다시(1점)', showsUserInterface: false, cancelNotification: true),
-              AndroidNotificationAction('3', '보통(3점)', showsUserInterface: false, cancelNotification: true),
-              AndroidNotificationAction('5', '완벽(5점)', showsUserInterface: false, cancelNotification: true),
+              AndroidNotificationAction(
+                '1',
+                '다시(1점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
+              AndroidNotificationAction(
+                '3',
+                '보통(3점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
+              AndroidNotificationAction(
+                '5',
+                '완벽(5점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
             ],
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
         UILocalNotificationDateInterpretation.absoluteTime,
-        payload: updatedItem.id,
+        payload: itemId,
       );
     }
     return updatedItem;
@@ -190,16 +218,32 @@ class AlarmService {
     final int notificationId = item.id.hashCode;
     if (item.nextReviewDate.isBefore(DateTime.now())) return;
 
-    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    final AndroidNotificationDetails androidDetails =
+    AndroidNotificationDetails(
       'memory_channel_v3',
       '기억 복습 알림',
       channelDescription: '에빙하우스 망각곡선 기반 복습 알림입니다.',
       importance: Importance.max,
       priority: Priority.high,
       actions: <AndroidNotificationAction>[
-        const AndroidNotificationAction('1', '다시(1점)', showsUserInterface: false, cancelNotification: true),
-        const AndroidNotificationAction('3', '보통(3점)', showsUserInterface: false, cancelNotification: true),
-        const AndroidNotificationAction('5', '완벽(5점)', showsUserInterface: false, cancelNotification: true),
+        const AndroidNotificationAction(
+          '1',
+          '다시(1점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
+        const AndroidNotificationAction(
+          '3',
+          '보통(3점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
+        const AndroidNotificationAction(
+          '5',
+          '완벽(5점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
       ],
     );
 
@@ -221,7 +265,8 @@ class AlarmService {
   }
 
   Future<void> showInstantNotification() async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    const AndroidNotificationDetails androidDetails =
+    AndroidNotificationDetails(
       'memory_channel_v3',
       '기억 복습 알림',
       channelDescription: '즉시 알림 테스트입니다.',
@@ -229,7 +274,9 @@ class AlarmService {
       priority: Priority.high,
     );
     await _notificationsPlugin.show(
-      0, '즉시 알림 테스트', '설정이 정상적으로 완료되었습니다.',
+      0,
+      '즉시 알림 테스트',
+      '설정이 정상적으로 완료되었습니다.',
       const NotificationDetails(android: androidDetails),
     );
   }
@@ -242,7 +289,7 @@ class AlarmService {
 
     if (index != -1) {
       itemToSave = items[index].copyWith(
-          content: MemoryConverter.fromMemo(memo, userProfile).content
+        content: MemoryConverter.fromMemo(memo, userProfile).content,
       );
       items[index] = itemToSave;
     } else {
@@ -262,7 +309,8 @@ class AlarmService {
     await _cancelNotification(targetId);
   }
 
-  Future<void> saveEvent(CalendarEvent event, UserProfile userProfile) async {
+  Future<void> saveEvent(
+      CalendarEvent event, UserProfile userProfile) async {
     final List<MemoryItem> items = await _loadItems();
     final String targetId = 'EVENT_${event.id}';
     final int index = items.indexWhere((item) => item.id == targetId);
@@ -270,7 +318,7 @@ class AlarmService {
 
     if (index != -1) {
       itemToSave = items[index].copyWith(
-          content: MemoryConverter.fromCalendarEvent(event, userProfile).content
+        content: MemoryConverter.fromCalendarEvent(event, userProfile).content,
       );
       items[index] = itemToSave;
     } else {

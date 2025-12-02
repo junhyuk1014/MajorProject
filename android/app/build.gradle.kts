@@ -4,6 +4,12 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+configurations.all {
+    resolutionStrategy {
+        force("androidx.activity:activity:1.9.0")
+        force("androidx.activity:activity-ktx:1.9.0")
+    }
+}
 
 android {
     namespace = "com.example.major_project"
@@ -13,10 +19,15 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
+    }
+    dependencies {
+        coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     }
 
     defaultConfig {

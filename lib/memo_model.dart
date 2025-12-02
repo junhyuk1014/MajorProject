@@ -5,12 +5,16 @@ class Memo {
   final DateTime createdAt;
   final DateTime? updatedAt;
 
+  /// 메모에 첨부된 이미지 경로 (없으면 null)
+  final String? imagePath;
+
   Memo({
     required this.id,
     required this.title,
     required this.content,
     required this.createdAt,
     this.updatedAt,
+    this.imagePath,
   });
 
   DateTime get lastModified => updatedAt ?? createdAt;
@@ -22,6 +26,7 @@ class Memo {
       'content': content,
       'createdAt': createdAt.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+      if (imagePath != null) 'imagePath': imagePath,  // 🔹 이미지 경로 저장
     };
   }
 
@@ -34,7 +39,7 @@ class Memo {
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'])
           : null,
+      imagePath: json['imagePath'], // 🔹 없으면 자동으로 null
     );
   }
 }
-
