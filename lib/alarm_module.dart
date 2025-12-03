@@ -15,262 +15,314 @@ import 'feedback_module.dart';
 
 @pragma('vm:entry-point')
 void notificationTapBackground(NotificationResponse response) {
-    handleFeedback(response);
+  handleFeedback(response);
 }
 
 @pragma('vm:entry-point')
 Future<void> handleFeedback(NotificationResponse response) async {
-    await AlarmService().processFeedback(response.payload, int.tryParse(response.actionId ?? ''));
+  await AlarmService().processFeedback(
+    response.payload,
+    int.tryParse(response.actionId ?? ''),
+  );
 }
 
 class MemoryConverter {
-    static MemoryItem fromMemo(Memo memo, UserProfile userProfile) {
-        final String combinedContent = "[메모] ${memo.title}\n${memo.content}";
-        return MemoryItem.initial(
-            id: 'MEMO_${memo.id}',
-            content: combinedContent,
-            initialEf: userProfile.globalEf,
-        );
-    }
+  static MemoryItem fromMemo(Memo memo, UserProfile userProfile) {
+    final String combinedContent = "[메모] ${memo.title}\n${memo.content}";
+    return MemoryItem.initial(
+      id: 'MEMO_${memo.id}',
+      content: combinedContent,
+      initialEf: userProfile.globalEf,
+    );
+  }
 
-    static MemoryItem fromCalendarEvent(CalendarEvent event, UserProfile userProfile) {
-        final String dateStr = "${event.startDate.month}/${event.startDate.day} ${event.startDate.hour}:${event.startDate.minute}";
-        final String combinedContent = "[일정] ${event.title}\n($dateStr) ${event.description ?? ''}";
-        return MemoryItem.initial(
-            id: 'EVENT_${event.id}',
-            content: combinedContent,
-            initialEf: userProfile.globalEf,
-        );
-    }
+  static MemoryItem fromCalendarEvent(
+      CalendarEvent event, UserProfile userProfile) {
+    final String dateStr =
+        "${event.startDate.month}/${event.startDate.day} ${event.startDate.hour}:${event.startDate.minute}";
+    final String combinedContent =
+        "[일정] ${event.title}\n($dateStr) ${event.description ?? ''}";
+    return MemoryItem.initial(
+      id: 'EVENT_${event.id}',
+      content: combinedContent,
+      initialEf: userProfile.globalEf,
+    );
+  }
 }
 
 class AlarmService {
-    static const String _storageKey = 'memory_items';
+  static const String _storageKey = 'memory_items';
 
-    static final StreamController<void> dataUpdateStream = StreamController.broadcast();
+  static final StreamController<void> dataUpdateStream =
+  StreamController<void>.broadcast();
 
-    final FlutterLocalNotificationsPlugin _notificationsPlugin =
+  final FlutterLocalNotificationsPlugin _notificationsPlugin =
+  FlutterLocalNotificationsPlugin();
+
+  AlarmService() {
+    _initializeNotifications();
+  }
+
+  Future<void> _initializeNotifications() async {
+    tz.initializeTimeZones();
+
+    try {
+      final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = tzInfo.identifier;
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+    } catch (e) {
+      print('타임존 설정 실패: $e');
+    }
+
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings initializationSettings =
+    InitializationSettings(android: initializationSettingsAndroid);
+
+    await _notificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        handleFeedback(response);
+      },
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+    );
+  }
+
+  Future<List<MemoryItem>> _loadItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final jsonList = prefs.getStringList(_storageKey) ?? [];
+    return jsonList
+        .map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr)))
+        .toList();
+  }
+
+  Future<void> _saveItems(List<MemoryItem> items) async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonList = items.map((item) => jsonEncode(item.toJson())).toList();
+    await prefs.setStringList(_storageKey, jsonList);
+  }
+
+  Future<MemoryItem?> getMemoryItem(String itemId) async {
+    final List<MemoryItem> items = await _loadItems();
+    try {
+      return items.firstWhere((item) => item.id == itemId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<MemoryItem?> processFeedback(String? itemId, int? score) async {
+    if (itemId == null || score == null) return null;
+
+    WidgetsFlutterBinding.ensureInitialized();
+
+    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@mipmap/ic_launcher');
+    await flutterLocalNotificationsPlugin.initialize(
+      const InitializationSettings(android: initializationSettingsAndroid),
+    );
 
-    AlarmService() {
-        _initializeNotifications();
+    await flutterLocalNotificationsPlugin.cancel(itemId.hashCode);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
+    final jsonList = prefs.getStringList(_storageKey) ?? [];
+    List<MemoryItem> items = jsonList
+        .map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr)))
+        .toList();
+
+    final int index = items.indexWhere((item) => item.id == itemId);
+    if (index == -1) {
+      return null;
     }
 
-    Future<void> _initializeNotifications() async {
-        tz.initializeTimeZones();
+    final feedbackModule = FeedbackModule();
+    final updatedItem = feedbackModule.schedule(items[index], score);
+    items[index] = updatedItem;
 
-        try {
-            final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
-            final String timeZoneName = tzInfo.identifier;
-            tz.setLocalLocation(tz.getLocation(timeZoneName));
-        } catch (e) {
-            print('타임존 설정 실패: $e');
-        }
+    final userProfile = UserProfile();
+    await userProfile.load();
+    await userProfile.updateUserEf(updatedItem.ef);
 
-        const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    final newJsonList = items.map((item) => jsonEncode(item.toJson())).toList();
+    await prefs.setStringList(_storageKey, newJsonList);
 
-        const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
+    // 대시보드/다른 화면에 "데이터 변경됨" 알리기
+    AlarmService.dataUpdateStream.add(null);
 
-        await _notificationsPlugin.initialize(
-            initializationSettings,
-            onDidReceiveNotificationResponse: (NotificationResponse response) {
-                handleFeedback(response);
-            },
-            onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
-        );
-    }
+    tz.initializeTimeZones();
+    try {
+      final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = tzInfo.identifier;
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+    } catch (e) {}
 
-    Future<List<MemoryItem>> _loadItems() async {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.reload();
-        final jsonList = prefs.getStringList(_storageKey) ?? [];
-        return jsonList
-            .map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr)))
-            .toList();
-    }
-
-    Future<void> _saveItems(List<MemoryItem> items) async {
-        final prefs = await SharedPreferences.getInstance();
-        final jsonList = items.map((item) => jsonEncode(item.toJson())).toList();
-        await prefs.setStringList(_storageKey, jsonList);
-    }
-
-    Future<MemoryItem?> getMemoryItem(String itemId) async {
-        final List<MemoryItem> items = await _loadItems();
-        try {
-            return items.firstWhere((item) => item.id == itemId);
-        } catch (e) {
-            return null;
-        }
-    }
-
-    Future<MemoryItem?> processFeedback(String? itemId, int? score) async {
-        if (itemId == null || score == null) return null;
-
-        WidgetsFlutterBinding.ensureInitialized();
-
-        final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
-        const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-        await flutterLocalNotificationsPlugin.initialize(
-            const InitializationSettings(android: initializationSettingsAndroid));
-
-        await flutterLocalNotificationsPlugin.cancel(itemId.hashCode);
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.reload();
-
-        final jsonList = prefs.getStringList(_storageKey) ?? [];
-        List<MemoryItem> items = jsonList
-            .map((jsonStr) => MemoryItem.fromJson(jsonDecode(jsonStr)))
-            .toList();
-
-        final int index = items.indexWhere((item) => item.id == itemId);
-        if (index == -1) {
-            return null;
-        }
-
-        final feedbackModule = FeedbackModule();
-        final updatedItem = feedbackModule.schedule(items[index], score);
-        items[index] = updatedItem;
-
-        final userProfile = UserProfile();
-        await userProfile.load();
-        await userProfile.updateUserEf(updatedItem.ef);
-
-        final newJsonList = items.map((item) => jsonEncode(item.toJson())).toList();
-        await prefs.setStringList(_storageKey, newJsonList);
-
-        AlarmService.dataUpdateStream.add(null);
-
-        tz.initializeTimeZones();
-        try {
-            final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
-            final String timeZoneName = tzInfo.identifier;
-            tz.setLocalLocation(tz.getLocation(timeZoneName));
-        } catch (e) {}
-
-        if (updatedItem.nextReviewDate.isAfter(DateTime.now())) {
-            await flutterLocalNotificationsPlugin.zonedSchedule(
-                updatedItem.id.hashCode,
-                '복습할 시간입니다!',
-                updatedItem.content.split('\n').first,
-                tz.TZDateTime.from(updatedItem.nextReviewDate, tz.local),
-                const NotificationDetails(
-                    android: AndroidNotificationDetails(
-                        'memory_channel_v3',
-                        '기억 복습 알림',
-                        channelDescription: '에빙하우스 망각곡선 기반 복습 알림입니다.',
-                        importance: Importance.max,
-                        priority: Priority.high,
-                        actions: <AndroidNotificationAction>[
-                            AndroidNotificationAction('1', '다시(1점)', showsUserInterface: false, cancelNotification: true),
-                            AndroidNotificationAction('3', '보통(3점)', showsUserInterface: false, cancelNotification: true),
-                            AndroidNotificationAction('5', '완벽(5점)', showsUserInterface: false, cancelNotification: true),
-                        ],
-                    ),
-                ),
-                androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-                uiLocalNotificationDateInterpretation:
-                UILocalNotificationDateInterpretation.absoluteTime,
-                payload: updatedItem.id,
-            );
-        }
-        return updatedItem;
-    }
-
-    Future<void> _scheduleNotification(MemoryItem item) async {
-        final int notificationId = item.id.hashCode;
-        if (item.nextReviewDate.isBefore(DateTime.now())) return;
-
-        const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    if (updatedItem.nextReviewDate.isAfter(DateTime.now())) {
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        updatedItem.id.hashCode,
+        '복습할 시간입니다!',
+        updatedItem.content.split('\n').first,
+        tz.TZDateTime.from(updatedItem.nextReviewDate, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
             'memory_channel_v3',
             '기억 복습 알림',
             channelDescription: '에빙하우스 망각곡선 기반 복습 알림입니다.',
             importance: Importance.max,
             priority: Priority.high,
             actions: <AndroidNotificationAction>[
-                AndroidNotificationAction('1', '다시(1점)', showsUserInterface: false, cancelNotification: true),
-                AndroidNotificationAction('3', '보통(3점)', showsUserInterface: false, cancelNotification: true),
-                AndroidNotificationAction('5', '완벽(5점)', showsUserInterface: false, cancelNotification: true),
+              AndroidNotificationAction(
+                '1',
+                '다시(1점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
+              AndroidNotificationAction(
+                '3',
+                '보통(3점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
+              AndroidNotificationAction(
+                '5',
+                '완벽(5점)',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
             ],
-        );
-
-        await _notificationsPlugin.zonedSchedule(
-            notificationId,
-            '복습할 시간입니다!',
-            item.content.split('\n').first,
-            tz.TZDateTime.from(item.nextReviewDate, tz.local),
-            const NotificationDetails(android: androidDetails),
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-            uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-            payload: item.id,
-        );
+          ),
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation.absoluteTime,
+        payload: updatedItem.id,
+      );
     }
+    return updatedItem;
+  }
 
-    Future<void> _cancelNotification(String itemId) async {
-        await _notificationsPlugin.cancel(itemId.hashCode);
+  Future<void> _scheduleNotification(MemoryItem item) async {
+    final int notificationId = item.id.hashCode;
+    if (item.nextReviewDate.isBefore(DateTime.now())) return;
+
+    const AndroidNotificationDetails androidDetails =
+    AndroidNotificationDetails(
+      'memory_channel_v3',
+      '기억 복습 알림',
+      channelDescription: '에빙하우스 망각곡선 기반 복습 알림입니다.',
+      importance: Importance.max,
+      priority: Priority.high,
+      actions: <AndroidNotificationAction>[
+        AndroidNotificationAction(
+          '1',
+          '다시(1점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
+        AndroidNotificationAction(
+          '3',
+          '보통(3점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
+        AndroidNotificationAction(
+          '5',
+          '완벽(5점)',
+          showsUserInterface: false,
+          cancelNotification: true,
+        ),
+      ],
+    );
+
+    await _notificationsPlugin.zonedSchedule(
+      notificationId,
+      '복습할 시간입니다!',
+      item.content.split('\n').first,
+      tz.TZDateTime.from(item.nextReviewDate, tz.local),
+      const NotificationDetails(android: androidDetails),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+      UILocalNotificationDateInterpretation.absoluteTime,
+      payload: item.id,
+    );
+  }
+
+  Future<void> _cancelNotification(String itemId) async {
+    await _notificationsPlugin.cancel(itemId.hashCode);
+  }
+
+  Future<void> saveMemo(Memo memo, UserProfile userProfile) async {
+    await userProfile.load();
+
+    final List<MemoryItem> items = await _loadItems();
+    final String targetId = 'MEMO_${memo.id}';
+    final int index = items.indexWhere((item) => item.id == targetId);
+    MemoryItem itemToSave;
+
+    if (index != -1) {
+      itemToSave = items[index].copyWith(
+        content: MemoryConverter.fromMemo(memo, userProfile).content,
+      );
+      items[index] = itemToSave;
+    } else {
+      itemToSave = MemoryConverter.fromMemo(memo, userProfile);
+      items.add(itemToSave);
     }
+    await _saveItems(items);
+    await _scheduleNotification(itemToSave);
 
-    Future<void> saveMemo(Memo memo, UserProfile userProfile) async {
-        await userProfile.load();
+    // 메모 저장 시에도 대시보드 갱신 알림
+    AlarmService.dataUpdateStream.add(null);
+  }
 
-        final List<MemoryItem> items = await _loadItems();
-        final String targetId = 'MEMO_${memo.id}';
-        final int index = items.indexWhere((item) => item.id == targetId);
-        MemoryItem itemToSave;
+  Future<void> deleteMemo(String memoId) async {
+    final List<MemoryItem> items = await _loadItems();
+    final String targetId = 'MEMO_$memoId';
+    items.removeWhere((item) => item.id == targetId);
+    await _saveItems(items);
+    await _cancelNotification(targetId);
 
-        if (index != -1) {
-            itemToSave = items[index].copyWith(
-                content: MemoryConverter.fromMemo(memo, userProfile).content
-            );
-            items[index] = itemToSave;
-        } else {
-            itemToSave = MemoryConverter.fromMemo(memo, userProfile);
-            items.add(itemToSave);
-        }
-        await _saveItems(items);
-        await _scheduleNotification(itemToSave);
+    // 메모 삭제 시에도 대시보드 갱신 알림
+    AlarmService.dataUpdateStream.add(null);
+  }
+
+  Future<void> saveEvent(CalendarEvent event, UserProfile userProfile) async {
+    await userProfile.load();
+
+    final List<MemoryItem> items = await _loadItems();
+    final String targetId = 'EVENT_${event.id}';
+    final int index = items.indexWhere((item) => item.id == targetId);
+    MemoryItem itemToSave;
+
+    if (index != -1) {
+      itemToSave = items[index].copyWith(
+        content: MemoryConverter.fromCalendarEvent(event, userProfile).content,
+      );
+      items[index] = itemToSave;
+    } else {
+      itemToSave = MemoryConverter.fromCalendarEvent(event, userProfile);
+      items.add(itemToSave);
     }
+    await _saveItems(items);
+    await _scheduleNotification(itemToSave);
 
-    Future<void> deleteMemo(String memoId) async {
-        final List<MemoryItem> items = await _loadItems();
-        final String targetId = 'MEMO_$memoId';
-        items.removeWhere((item) => item.id == targetId);
-        await _saveItems(items);
-        await _cancelNotification(targetId);
-    }
+    // 일정 저장 시에도 대시보드 갱신 알림
+    AlarmService.dataUpdateStream.add(null);
+  }
 
-    Future<void> saveEvent(CalendarEvent event, UserProfile userProfile) async {
-        await userProfile.load();
+  Future<void> deleteEvent(String eventId) async {
+    final List<MemoryItem> items = await _loadItems();
+    final String targetId = 'EVENT_$eventId';
+    items.removeWhere((item) => item.id == targetId);
+    await _saveItems(items);
+    await _cancelNotification(targetId);
 
-        final List<MemoryItem> items = await _loadItems();
-        final String targetId = 'EVENT_${event.id}';
-        final int index = items.indexWhere((item) => item.id == targetId);
-        MemoryItem itemToSave;
-
-        if (index != -1) {
-            itemToSave = items[index].copyWith(
-                content: MemoryConverter.fromCalendarEvent(event, userProfile).content
-            );
-            items[index] = itemToSave;
-        } else {
-            itemToSave = MemoryConverter.fromCalendarEvent(event, userProfile);
-            items.add(itemToSave);
-        }
-        await _saveItems(items);
-        await _scheduleNotification(itemToSave);
-    }
-
-    Future<void> deleteEvent(String eventId) async {
-        final List<MemoryItem> items = await _loadItems();
-        final String targetId = 'EVENT_$eventId';
-        items.removeWhere((item) => item.id == targetId);
-        await _saveItems(items);
-        await _cancelNotification(targetId);
-    }
+    // 일정 삭제 시에도 대시보드 갱신 알림
+    AlarmService.dataUpdateStream.add(null);
+  }
 }
