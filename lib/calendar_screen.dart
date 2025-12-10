@@ -211,10 +211,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
             // Google Calendar에서 불러온 이벤트 처리
             for (var event in events.items ?? []) {
                 if (event.start?.dateTime != null || event.start?.date != null) {
-                    final startDate = event.start?.dateTime ??
-                        DateTime.parse(event.start!.date!.toIso8601String());
-                    final endDate = event.end?.dateTime ??
-                        DateTime.parse(event.end!.date!.toIso8601String());
+                    // Google Calendar API는 UTC 시간을 반환하므로 로컬 시간으로 변환 필요
+                    final startDate = event.start?.dateTime != null
+                        ? event.start!.dateTime!.toLocal()
+                        : DateTime.parse(event.start!.date!.toIso8601String());
+                    final endDate = event.end?.dateTime != null
+                        ? event.end!.dateTime!.toLocal()
+                        : DateTime.parse(event.end!.date!.toIso8601String());
 
                     final dateKey = DateTime(startDate.year, startDate.month, startDate.day);
                     final eventId = event.id ?? DateTime.now().millisecondsSinceEpoch.toString();
