@@ -5,6 +5,12 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/calendar/v3.dart' as cal;
 import 'package:http/http.dart' as http;
 import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'calendar_event_model.dart';
 import 'alarm_module.dart';
 import 'user_profile.dart';
@@ -39,7 +45,7 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen> {
     CalendarFormat _calendarFormat = CalendarFormat.month;
     DateTime _focusedDay = DateTime.now();
-    DateTime _selectedDay = DateTime.now();
+    DateTime? _selectedDay;
     Map<DateTime, List<CalendarEvent>> _events = {};
     List<CalendarEvent> _selectedEvents = [];
     final AlarmService _alarmService = AlarmService();
@@ -53,9 +59,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
     @override
     void initState() {
         super.initState();
+        final now = DateTime.now();
+        _focusedDay = _dateOnly(now);   // 오늘을 기준으로 캘린더를 보여줌
+        _selectedDay = null;            // 처음에는 아무 날짜도 선택하지 않음
         _loadUserProfile();
         _initializeGoogleSignIn();
-        _selectedEvents = _getEventsForDay(_selectedDay);
+        _selectedEvents = [];           // 선택한 날짜가 없으니 빈 리스트
     }
 
     Future<void> _loadUserProfile() async {
@@ -150,6 +159,26 @@ class _CalendarScreenState extends State<CalendarScreen> {
         return DateTime(date.year, date.month, date.day);
     }
 
+
+    Future<String?> _pickAndSaveImage() async {
+        try {
+            final picker = ImagePicker();
+            final XFile? picked =
+                await picker.pickImage(source: ImageSource.gallery);
+
+            if (picked == null) return null;
+
+            final appDir = await getApplicationDocumentsDirectory();
+            final fileName =
+                'event_img_${DateTime.now().millisecondsSinceEpoch}${p.extension(picked.path)}';
+            final savedPath = p.join(appDir.path, fileName);
+            await File(picked.path).copy(savedPath);
+            return savedPath;
+        } catch (e) {
+            return null;
+        }
+    }
+
     Future<void> _loadEventsFromGoogle() async {
         if (_calendarApi == null) return;
 
@@ -169,6 +198,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 maxResults: 2500,
             );
 
+            // 로컬에 저장된 이벤트 불러오기
+            final localEvents = await _loadLocalEvents();
+            final Map<String, CalendarEvent> localEventsMap = {
+                for (var e in localEvents) e.id: e
+            };
+
             final Map<DateTime, List<CalendarEvent>> eventsMap = {};
 
             for (var event in events.items ?? []) {
@@ -179,11 +214,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         DateTime.parse(event.end!.date!.toIso8601String());
 
                     final dateKey = DateTime(startDate.year, startDate.month, startDate.day);
+                    final eventId = event.id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
-                    final calendarEvent = CalendarEvent(
-                        id: event.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                    // 로컬에 저장된 이벤트가 있으면 그것을 사용, 없으면 새로 생성
+                    final calendarEvent = localEventsMap[eventId] ?? CalendarEvent(
+                        id: eventId,
                         title: event.summary ?? '(제목 없음)',
                         description: event.description,
+                        startDate: startDate,
+                        endDate: endDate,
+                        isAllDay: event.start?.date != null,
+                    );
+
+                    // Google Calendar에서 업데이트된 정보로 갱신 (이미지는 유지)
+                    final updatedEvent = calendarEvent.copyWith(
+                        title: event.summary ?? calendarEvent.title,
+                        description: event.description ?? calendarEvent.description,
                         startDate: startDate,
                         endDate: endDate,
                         isAllDay: event.start?.date != null,
@@ -192,13 +238,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     if (eventsMap[dateKey] == null) {
                         eventsMap[dateKey] = [];
                     }
-                    eventsMap[dateKey]!.add(calendarEvent);
+                    eventsMap[dateKey]!.add(updatedEvent);
                 }
             }
 
+            // 로컬 이벤트 저장
+            final allEvents = eventsMap.values.expand((list) => list).toList();
+            await _saveLocalEvents(allEvents);
+
             setState(() {
                 _events = eventsMap;
-                _selectedEvents = _getEventsForDay(_selectedDay);
+                _selectedEvents = _selectedDay == null
+                    ? []
+                    : _getEventsForDay(_selectedDay!);
                 _isLoading = false;
             });
         } catch (e) {
@@ -213,17 +265,47 @@ class _CalendarScreenState extends State<CalendarScreen> {
         }
     }
 
+    Future<List<CalendarEvent>> _loadLocalEvents() async {
+        try {
+            final prefs = await SharedPreferences.getInstance();
+            final eventsJson = prefs.getStringList('calendar_events') ?? [];
+            return eventsJson
+                .map((json) => CalendarEvent.fromJson(jsonDecode(json)))
+                .toList();
+        } catch (e) {
+            return [];
+        }
+    }
+
+    Future<void> _saveLocalEvents(List<CalendarEvent> events) async {
+        try {
+            final prefs = await SharedPreferences.getInstance();
+            final eventsJson = events.map((event) => jsonEncode(event.toJson())).toList();
+            await prefs.setStringList('calendar_events', eventsJson);
+        } catch (e) {
+            print('일정 저장 오류: $e');
+        }
+    }
+
     List<CalendarEvent> _getEventsForDay(DateTime day) {
         final dateKey = DateTime(day.year, day.month, day.day);
         return _events[dateKey] ?? [];
     }
 
     void _onDaySelected(DateTime selectedDay, DateTime focusedDay) {
-        if (!isSameDay(_selectedDay, selectedDay)) {
+        final dateOnlySelected = _dateOnly(selectedDay);
+        final DateTime? dateOnlyCurrent =
+            _selectedDay == null ? null : _dateOnly(_selectedDay!);
+
+        // 처음 선택하거나, 이전 선택과 날짜가 다를 때만 업데이트
+        if (dateOnlyCurrent == null ||
+            dateOnlyCurrent.year != dateOnlySelected.year ||
+            dateOnlyCurrent.month != dateOnlySelected.month ||
+            dateOnlyCurrent.day != dateOnlySelected.day) {
             setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-                _selectedEvents = _getEventsForDay(selectedDay);
+                _selectedDay = dateOnlySelected;
+                _focusedDay = _dateOnly(focusedDay);
+                _selectedEvents = _getEventsForDay(_selectedDay!);
             });
         }
     }
@@ -239,6 +321,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         DateTime startDate = DateTime(date.year, date.month, date.day, 9, 0);
         DateTime endDate = DateTime(date.year, date.month, date.day, 10, 0);
         bool isAllDay = false;
+        String? tempImagePath;
 
         final result = await showDialog<bool>(
             context: context,
@@ -260,6 +343,66 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     decoration: const InputDecoration(labelText: '설명', border: OutlineInputBorder()),
                                     maxLines: 3,
                                 ),
+                                const SizedBox(height: 16),
+                                // 사진 추가 버튼을 먼저 표시
+                                TextButton.icon(
+                                    onPressed: () async {
+                                        final path = await _pickAndSaveImage();
+                                        if (!context.mounted) return;
+                                        if (path != null) {
+                                            setDialogState(() {
+                                                tempImagePath = path;
+                                            });
+                                        }
+                                    },
+                                    icon: const Icon(Icons.image),
+                                    label: const Text('사진 추가'),
+                                ),
+                                if (tempImagePath != null)
+                                    Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Stack(
+                                            children: [
+                                                ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.file(
+                                                        File(tempImagePath!),
+                                                        height: 150,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder: (context, error, stackTrace) {
+                                                            return Container(
+                                                                height: 150,
+                                                                color: Colors.grey[300],
+                                                                alignment: Alignment.center,
+                                                                child: const Text(
+                                                                    '이미지를 불러올 수 없습니다.',
+                                                                    style: TextStyle(fontSize: 12),
+                                                                ),
+                                                            );
+                                                        },
+                                                    ),
+                                                ),
+                                                Positioned(
+                                                    right: 0,
+                                                    top: 0,
+                                                    child: GestureDetector(
+                                                        onTap: () {
+                                                            setDialogState(() {
+                                                                tempImagePath = null;
+                                                            });
+                                                        },
+                                                        child: Container(
+                                                            color: Colors.black54,
+                                                            child: const Icon(
+                                                                Icons.close,
+                                                                color: Colors.white,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ],
+                                        ),
+                                    ),
                                 const SizedBox(height: 16),
                                 CheckboxListTile(
                                     title: const Text('하루 종일'),
@@ -334,6 +477,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 startDate,
                 endDate,
                 isAllDay,
+                tempImagePath,
             );
         }
     }
@@ -344,6 +488,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         DateTime startDate,
         DateTime endDate,
         bool isAllDay,
+        String? imagePath,
         ) async {
         if (_calendarApi == null) return;
 
@@ -371,7 +516,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     startDate: startDate,
                     endDate: endDate,
                     isAllDay: isAllDay,
+                    imagePath: imagePath,
                 );
+                
+                // 로컬에 저장
+                final localEvents = await _loadLocalEvents();
+                localEvents.add(localEvent);
+                await _saveLocalEvents(localEvents);
+                
                 await _alarmService.saveEvent(localEvent, _userProfile);
             }
 
@@ -403,10 +555,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
 
     void _showEventDetail(CalendarEvent event, DateTime date) {
-        final eventIndex = _events[DateTime(date.year, date.month, date.day)]
-            ?.indexWhere((e) => e.id == event.id) ?? -1;
+        try {
+            final dateKey = DateTime(date.year, date.month, date.day);
+            final eventIndex = _events[dateKey]
+                ?.indexWhere((e) => e.id == event.id) ?? -1;
 
-        showDialog(
+            if (!mounted) return;
+            showDialog(
             context: context,
             builder: (context) => AlertDialog(
                 backgroundColor: Colors.white,
@@ -458,6 +613,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
                                             return Column(
                                                 children: [
+                                                    if (event.imagePath != null)
+                                                        Padding(
+                                                            padding: const EdgeInsets.only(bottom: 16.0),
+                                                            child: ClipRRect(
+                                                                borderRadius: BorderRadius.circular(8),
+                                                                child: Image.file(
+                                                                    File(event.imagePath!),
+                                                                    width: double.infinity,
+                                                                    height: 200,
+                                                                    fit: BoxFit.cover,
+                                                                    errorBuilder: (context, error, stackTrace) {
+                                                                        return const SizedBox.shrink();
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        ),
                                                     const Text('복습 시간입니다!', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
                                                     const SizedBox(height: 12),
                                                     Row(
@@ -493,6 +664,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ],
             ),
         );
+        } catch (e) {
+            if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('일정 상세 보기 오류: $e')),
+                );
+            }
+        }
     }
 
     Widget _buildFeedbackBtn(String text, int score, Color color, CalendarEvent event) {
@@ -516,6 +694,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         DateTime startDate = event.startDate;
         DateTime endDate = event.endDate;
         bool isAllDay = event.isAllDay;
+        String? tempImagePath = event.imagePath;
 
         final result = await showDialog<bool>(
             context: context,
@@ -537,6 +716,68 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     decoration: const InputDecoration(labelText: '설명', border: OutlineInputBorder()),
                                     maxLines: 3,
                                 ),
+                                const SizedBox(height: 16),
+                                // 사진 추가 버튼을 먼저 표시
+                                TextButton.icon(
+                                    onPressed: () async {
+                                        final path = await _pickAndSaveImage();
+                                        if (!context.mounted) return;
+                                        if (path != null) {
+                                            setDialogState(() {
+                                                tempImagePath = path;
+                                            });
+                                        }
+                                    },
+                                    icon: const Icon(Icons.image),
+                                    label: Text(
+                                        tempImagePath == null ? '사진 추가' : '사진 변경',
+                                    ),
+                                ),
+                                if (tempImagePath != null)
+                                    Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Stack(
+                                            children: [
+                                                ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.file(
+                                                        File(tempImagePath!),
+                                                        height: 150,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder: (context, error, stackTrace) {
+                                                            return Container(
+                                                                height: 150,
+                                                                color: Colors.grey[300],
+                                                                alignment: Alignment.center,
+                                                                child: const Text(
+                                                                    '이미지를 불러올 수 없습니다.',
+                                                                    style: TextStyle(fontSize: 12),
+                                                                ),
+                                                            );
+                                                        },
+                                                    ),
+                                                ),
+                                                Positioned(
+                                                    right: 0,
+                                                    top: 0,
+                                                    child: GestureDetector(
+                                                        onTap: () {
+                                                            setDialogState(() {
+                                                                tempImagePath = null;
+                                                            });
+                                                        },
+                                                        child: Container(
+                                                            color: Colors.black54,
+                                                            child: const Icon(
+                                                                Icons.close,
+                                                                color: Colors.white,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ],
+                                        ),
+                                    ),
                                 const SizedBox(height: 16),
                                 CheckboxListTile(
                                     title: const Text('하루 종일'),
@@ -612,6 +853,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 startDate,
                 endDate,
                 isAllDay,
+                tempImagePath,
             );
         }
     }
@@ -623,6 +865,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         DateTime startDate,
         DateTime endDate,
         bool isAllDay,
+        String? imagePath,
         ) async {
         if (_calendarApi == null) return;
 
@@ -642,6 +885,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     : cal.EventDateTime(dateTime: endDate.toUtc());
 
             final updatedEvent = await _calendarApi!.events.update(event, 'primary', eventId);
+            
             final localEvent = CalendarEvent(
                 id: eventId,
                 title: title,
@@ -649,7 +893,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 startDate: startDate,
                 endDate: endDate,
                 isAllDay: isAllDay,
+                imagePath: imagePath,
             );
+            
+            // 로컬에 저장
+            final localEvents = await _loadLocalEvents();
+            final index = localEvents.indexWhere((e) => e.id == eventId);
+            if (index != -1) {
+                localEvents[index] = localEvent;
+            } else {
+                localEvents.add(localEvent);
+            }
+            await _saveLocalEvents(localEvents);
+            
             await _alarmService.saveEvent(localEvent, _userProfile);
             await _loadEventsFromGoogle();
 
@@ -706,6 +962,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
         try {
             await _calendarApi!.events.delete('primary', eventId);
             await _alarmService.deleteEvent(eventId);
+            
+            // 로컬에서도 삭제
+            final localEvents = await _loadLocalEvents();
+            localEvents.removeWhere((e) => e.id == eventId);
+            await _saveLocalEvents(localEvents);
+            
             await _loadEventsFromGoogle();
 
             if (mounted) {
@@ -752,7 +1014,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         ),
                     IconButton(
                         icon: const Icon(Icons.add),
-                        onPressed: () => _showAddEventDialog(_selectedDay),
+                        onPressed: () => _showAddEventDialog(_selectedDay ?? _focusedDay),
                         tooltip: '일정 추가',
                     ),
                 ],
@@ -789,7 +1051,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             calendarFormat: _calendarFormat,
                             eventLoader: _getEventsForDay,
                             startingDayOfWeek: StartingDayOfWeek.monday,
-                            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                            selectedDayPredicate: (day) {
+                                if (_selectedDay == null) return false;
+                                final selected = _dateOnly(_selectedDay!);
+                                final checkDay = _dateOnly(day);
+                                return selected.year == checkDay.year &&
+                                       selected.month == checkDay.month &&
+                                       selected.day == checkDay.day;
+                            },
                             onDaySelected: _onDaySelected,
                             onFormatChanged: (format) {
                                 if (_calendarFormat != format) {
@@ -799,7 +1068,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 }
                             },
                             onPageChanged: (focusedDay) {
-                                _focusedDay = focusedDay;
+                                setState(() {
+                                    _focusedDay = _dateOnly(focusedDay);
+                                });
                             },
                             calendarStyle: const CalendarStyle(
                                 todayDecoration: BoxDecoration(
@@ -807,7 +1078,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     shape: BoxShape.circle,
                                 ),
                                 selectedDecoration: BoxDecoration(
-                                    color: Colors.blueAccent,
+                                    color: Colors.blueGrey,
                                     shape: BoxShape.circle,
                                 ),
                                 markerDecoration: BoxDecoration(
@@ -837,6 +1108,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                             color: const Color(0xFFF5F5F5),
                                             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                             child: ListTile(
+                                                leading: event.imagePath != null
+                                                    ? ClipRRect(
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        child: Image.file(
+                                                            File(event.imagePath!),
+                                                            width: 50,
+                                                            height: 50,
+                                                            fit: BoxFit.cover,
+                                                            errorBuilder: (context, error, stackTrace) {
+                                                                return Container(
+                                                                    width: 50,
+                                                                    height: 50,
+                                                                    color: Colors.grey[300],
+                                                                    alignment: Alignment.center,
+                                                                    child: const Icon(
+                                                                        Icons.broken_image,
+                                                                        size: 20,
+                                                                    ),
+                                                                );
+                                                            },
+                                                        ),
+                                                    )
+                                                    : null,
                                                 title: Text(
                                                     event.title,
                                                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -861,7 +1155,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                                         ),
                                                     ],
                                                 ),
-                                                onTap: () => _showEventDetail(event, _selectedDay),
+                                                onTap: () => _showEventDetail(event, _selectedDay ?? _focusedDay),
                                             ),
                                         );
                                     },
