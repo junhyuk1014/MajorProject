@@ -604,10 +604,57 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 이미지가 있으면 맨 위에 표시 (FutureBuilder로 비동기 로드)
+                  if (event.imagePath != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: FutureBuilder<Uint8List?>(
+                        future: _safeLoadImageBytes(event.imagePath!),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Container(
+                              height: 180,
+                              // width를 지정하지 않고 부모(다이얼로그)의 가로 제약에 맞게 채우도록 둔다.
+                              color: Colors.grey[200],
+                              alignment: Alignment.center,
+                              child: const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+                            debugPrint('❗ [다이얼로그 이미지 표시 실패] eventId: ${event.id}, imagePath: ${event.imagePath}');
+                            return Container(
+                              height: 180,
+                              // width를 지정하지 않아서 IntrinsicWidth 계산 시 무한대가 되지 않도록 함
+                              color: Colors.grey[300],
+                              alignment: Alignment.center,
+                              child: const Text(
+                                '이미지를 불러올 수 없습니다.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            );
+                          }
+                          return Image.memory(
+                            snapshot.data!,
+                            height: 180,
+                            // width를 지정하지 않고, AlertDialog가 부여하는 가로 제약 내에서만 차지하게 둔다.
+                            fit: BoxFit.cover,
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // 설명 텍스트
                   if (event.description != null && event.description!.isNotEmpty) ...[
                     Text(event.description!),
                     const SizedBox(height: 16),
                   ],
+
                   const Divider(),
                   Text(
                     '시작: ${event.startDate.toString().split('.')[0]}',
@@ -861,7 +908,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     : cal.EventDateTime(dateTime: endDate.toUtc());
 
             final updatedEvent = await _calendarApi!.events.update(event, 'primary', eventId);
-            
+
             final localEvent = CalendarEvent(
                 id: eventId,
                 title: title,
@@ -871,7 +918,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 isAllDay: isAllDay,
                 imagePath: imagePath,
             );
-            
+
             // 로컬에 저장
             final localEvents = await _loadLocalEvents();
             final index = localEvents.indexWhere((e) => e.id == eventId);
@@ -881,7 +928,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 localEvents.add(localEvent);
             }
             await _saveLocalEvents(localEvents);
-            
+
             await _alarmService.saveEvent(localEvent, _userProfile);
             await _loadEventsFromGoogle();
 
@@ -938,12 +985,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
         try {
             await _calendarApi!.events.delete('primary', eventId);
             await _alarmService.deleteEvent(eventId);
-            
+
             // 로컬에서도 삭제
             final localEvents = await _loadLocalEvents();
             localEvents.removeWhere((e) => e.id == eventId);
             await _saveLocalEvents(localEvents);
-            
+
             await _loadEventsFromGoogle();
 
             if (mounted) {
@@ -1162,3 +1209,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
         );
     }
 }
+    /// 안전하게 이미지 파일을 읽어 바이트 배열로 반환 (존재 여부/예외 처리/로깅 포함)
+    Future<Uint8List?> _safeLoadImageBytes(String path) async {
+      try {
+        final file = File(path);
+
+        // 1️⃣ 파일 존재 여부 확인
+        final exists = await file.exists();
+        if (!exists) {
+          debugPrint('❌ [이미지 로드 실패] 파일이 존재하지 않습니다: $path');
+          return null;
+        }
+
+        // 2️⃣ 파일 읽기 시도
+        final bytes = await file.readAsBytes();
+
+        // 3️⃣ 정상 로드 로그
+        debugPrint('✅ [이미지 로드 성공] 경로: $path / 바이트 크기: ${bytes.length}');
+        return bytes;
+      } catch (e, stack) {
+        // 4️⃣ 예외 발생 로그
+        debugPrint('🔥 [이미지 로드 예외 발생]');
+        debugPrint('경로: $path');
+        debugPrint('에러: $e');
+        debugPrint('스택: $stack');
+        return null;
+      }
+    }
