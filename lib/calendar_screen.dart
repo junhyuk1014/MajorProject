@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -205,7 +206,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
             };
 
             final Map<DateTime, List<CalendarEvent>> eventsMap = {};
+            final Set<String> processedEventIds = {}; // 처리된 이벤트 ID 추적
 
+            // Google Calendar에서 불러온 이벤트 처리
             for (var event in events.items ?? []) {
                 if (event.start?.dateTime != null || event.start?.date != null) {
                     final startDate = event.start?.dateTime ??
@@ -215,6 +218,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
                     final dateKey = DateTime(startDate.year, startDate.month, startDate.day);
                     final eventId = event.id ?? DateTime.now().millisecondsSinceEpoch.toString();
+                    processedEventIds.add(eventId);
 
                     // 로컬에 저장된 이벤트가 있으면 그것을 사용, 없으면 새로 생성
                     final calendarEvent = localEventsMap[eventId] ?? CalendarEvent(
@@ -233,12 +237,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         startDate: startDate,
                         endDate: endDate,
                         isAllDay: event.start?.date != null,
+                        imagePath: calendarEvent.imagePath, // 이미지 경로 명시적으로 유지
                     );
 
                     if (eventsMap[dateKey] == null) {
                         eventsMap[dateKey] = [];
                     }
                     eventsMap[dateKey]!.add(updatedEvent);
+                }
+            }
+
+            // 로컬에만 있는 이벤트 추가 (이미지가 있는 이벤트 등)
+            for (var localEvent in localEvents) {
+                if (!processedEventIds.contains(localEvent.id)) {
+                    print('로컬 전용 이벤트 발견 - ID: ${localEvent.id}, imagePath: ${localEvent.imagePath}');
+                    final dateKey = DateTime(localEvent.startDate.year, localEvent.startDate.month, localEvent.startDate.day);
+                    if (eventsMap[dateKey] == null) {
+                        eventsMap[dateKey] = [];
+                    }
+                    // 중복 체크
+                    if (!eventsMap[dateKey]!.any((e) => e.id == localEvent.id)) {
+                        eventsMap[dateKey]!.add(localEvent);
+                        print('로컬 전용 이벤트 추가됨 - ID: ${localEvent.id}, imagePath: ${localEvent.imagePath}');
+                    }
                 }
             }
 
@@ -519,10 +540,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     imagePath: imagePath,
                 );
                 
+                // 디버깅 로그
+                print('=== _addEventToGoogle 디버깅 ===');
+                print('Created Event ID: ${createdEvent.id}');
+                print('ImagePath: $imagePath');
+                print('LocalEvent imagePath: ${localEvent.imagePath}');
+                print('==============================');
+                
                 // 로컬에 저장
                 final localEvents = await _loadLocalEvents();
                 localEvents.add(localEvent);
                 await _saveLocalEvents(localEvents);
+                
+                // 저장 후 확인
+                final savedEvents = await _loadLocalEvents();
+                final savedEvent = savedEvents.firstWhere((e) => e.id == createdEvent.id!, orElse: () => localEvent);
+                print('저장 후 확인 - Event ID: ${savedEvent.id}, imagePath: ${savedEvent.imagePath}');
                 
                 await _alarmService.saveEvent(localEvent, _userProfile);
             }
@@ -555,122 +588,65 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
 
     void _showEventDetail(CalendarEvent event, DateTime date) {
-        try {
-            final dateKey = DateTime(date.year, date.month, date.day);
-            final eventIndex = _events[dateKey]
-                ?.indexWhere((e) => e.id == event.id) ?? -1;
+      try {
+        final dateKey = DateTime(date.year, date.month, date.day);
+        final eventIndex = _events[dateKey]?.indexWhere((e) => e.id == event.id) ?? -1;
 
-            if (!mounted) return;
-            showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-                backgroundColor: Colors.white,
-                title: Text(event.title),
-                content: SingleChildScrollView(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                            if (event.description != null && event.description!.isNotEmpty) ...[
-                                Text(event.description!),
-                                const SizedBox(height: 16),
-                            ],
-                            const Divider(),
-                            Text(
-                                '시작: ${event.startDate.toString().split('.')[0]}',
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                                '종료: ${event.endDate.toString().split('.')[0]}',
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
+        if (!mounted) return;
 
-                            const SizedBox(height: 24),
-
-                            StreamBuilder<void>(
-                                stream: AlarmService.dataUpdateStream.stream,
-                                builder: (context, _) {
-                                    return FutureBuilder<MemoryItem?>(
-                                        future: _alarmService.getMemoryItem('EVENT_${event.id}'),
-                                        builder: (context, snapshot) {
-                                            if (!snapshot.hasData || snapshot.data == null) {
-                                                return const SizedBox.shrink();
-                                            }
-
-                                            final item = snapshot.data!;
-                                            final isDue = DateTime.now().isAfter(item.nextReviewDate);
-
-                                            if (!isDue) {
-                                                return Center(
-                                                    child: Text(
-                                                        '복습 완료\n다음: ${item.nextReviewDate.toString().split('.')[0]}',
-                                                        textAlign: TextAlign.center,
-                                                        style: const TextStyle(color: Colors.blueGrey, fontSize: 13),
-                                                    ),
-                                                );
-                                            }
-
-                                            return Column(
-                                                children: [
-                                                    if (event.imagePath != null)
-                                                        Padding(
-                                                            padding: const EdgeInsets.only(bottom: 16.0),
-                                                            child: ClipRRect(
-                                                                borderRadius: BorderRadius.circular(8),
-                                                                child: Image.file(
-                                                                    File(event.imagePath!),
-                                                                    width: double.infinity,
-                                                                    height: 200,
-                                                                    fit: BoxFit.cover,
-                                                                    errorBuilder: (context, error, stackTrace) {
-                                                                        return const SizedBox.shrink();
-                                                                    },
-                                                                ),
-                                                            ),
-                                                        ),
-                                                    const Text('복습 시간입니다!', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                                                    const SizedBox(height: 12),
-                                                    Row(
-                                                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                                        children: [
-                                                            _buildFeedbackBtn('다시(1)', 1, Colors.red, event),
-                                                            _buildFeedbackBtn('보통(3)', 3, Colors.blue, event),
-                                                            _buildFeedbackBtn('완벽(5)', 5, Colors.green, event),
-                                                        ],
-                                                    ),
-                                                ],
-                                            );
-                                        },
-                                    );
-                                }
-                            ),
-                        ],
-                    ),
-                ),
-                actions: [
-                    TextButton(
-                        onPressed: () => _showDeleteConfirmDialog(event, date, eventIndex),
-                        child: const Text('삭제', style: TextStyle(color: Colors.red)),
-                    ),
-                    TextButton(
-                        onPressed: () {
-                            Navigator.of(context).pop();
-                            _showEditEventDialog(event, date, eventIndex);
-                        },
-                        child: const Text('수정'),
-                    ),
-                    TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('닫기')),
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.white,
+            title: Text(event.title.isEmpty ? '(제목 없음)' : event.title),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (event.description != null && event.description!.isNotEmpty) ...[
+                    Text(event.description!),
+                    const SizedBox(height: 16),
+                  ],
+                  const Divider(),
+                  Text(
+                    '시작: ${event.startDate.toString().split('.')[0]}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '종료: ${event.endDate.toString().split('.')[0]}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                 ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => _showDeleteConfirmDialog(event, date, eventIndex),
+                child: const Text('삭제', style: TextStyle(color: Colors.red)),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showEditEventDialog(event, date, eventIndex);
+                },
+                child: const Text('수정'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('닫기'),
+              ),
+            ],
+          ),
         );
-        } catch (e) {
-            if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('일정 상세 보기 오류: $e')),
-                );
-            }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('일정 상세 보기 오류: $e')),
+          );
         }
+      }
     }
 
     Widget _buildFeedbackBtn(String text, int score, Color color, CalendarEvent event) {
@@ -1111,21 +1087,41 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                                 leading: event.imagePath != null
                                                     ? ClipRRect(
                                                         borderRadius: BorderRadius.circular(4),
-                                                        child: Image.file(
-                                                            File(event.imagePath!),
-                                                            width: 50,
-                                                            height: 50,
-                                                            fit: BoxFit.cover,
-                                                            errorBuilder: (context, error, stackTrace) {
-                                                                return Container(
+                                                        child: FutureBuilder<Uint8List>(
+                                                            future: File(event.imagePath!).readAsBytes(),
+                                                            builder: (context, snapshot) {
+                                                                print('detail snapshot: hasData=${snapshot.hasData}, '
+                                                                    'data=${snapshot.data}, state=${snapshot.connectionState}');
+                                                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                                                    return Container(
+                                                                        width: 50,
+                                                                        height: 50,
+                                                                        color: Colors.grey[200],
+                                                                        alignment: Alignment.center,
+                                                                        child: const SizedBox(
+                                                                            width: 20,
+                                                                            height: 20,
+                                                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                                                        ),
+                                                                    );
+                                                                }
+                                                                if (snapshot.hasError || !snapshot.hasData) {
+                                                                    return Container(
+                                                                        width: 50,
+                                                                        height: 50,
+                                                                        color: Colors.grey[300],
+                                                                        alignment: Alignment.center,
+                                                                        child: const Icon(
+                                                                            Icons.broken_image,
+                                                                            size: 20,
+                                                                        ),
+                                                                    );
+                                                                }
+                                                                return Image.memory(
+                                                                    snapshot.data!,
                                                                     width: 50,
                                                                     height: 50,
-                                                                    color: Colors.grey[300],
-                                                                    alignment: Alignment.center,
-                                                                    child: const Icon(
-                                                                        Icons.broken_image,
-                                                                        size: 20,
-                                                                    ),
+                                                                    fit: BoxFit.cover,
                                                                 );
                                                             },
                                                         ),
