@@ -668,6 +668,58 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     '종료: ${event.endDate.toString().split('.')[0]}',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
+                  const Divider(height: 32),
+                  // MemoScreen과 동일한 로직으로 EVENT용 복습 상태 및 버튼을 표시
+                  StreamBuilder<void>(
+                    stream: AlarmService.dataUpdateStream.stream,
+                    builder: (context, _) {
+                      return FutureBuilder<MemoryItem?>(
+                        future: _alarmService.getMemoryItem('EVENT_${event.id}'),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const SizedBox.shrink();
+                          }
+
+                          final item = snapshot.data!;
+                          final isDue = DateTime.now().isAfter(item.nextReviewDate);
+
+                          if (!isDue) {
+                            return Center(
+                              child: Text(
+                                '복습 완료\n다음: ${item.nextReviewDate.toString().split('.')[0]}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.blueGrey,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            );
+                          }
+
+                          return Column(
+                            children: [
+                              const Text(
+                                '복습 시간입니다!',
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  _buildFeedbackBtn('다시(1)', 1, Colors.red, event),
+                                  _buildFeedbackBtn('보통(3)', 3, Colors.blue, event),
+                                  _buildFeedbackBtn('완벽(5)', 5, Colors.green, event),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
