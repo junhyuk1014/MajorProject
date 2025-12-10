@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart';
-
+import 'test_logic.dart';
 import 'calendar_screen.dart';
 import 'memo_screen.dart';
 import 'memory_item.dart';
@@ -36,11 +36,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-
+    injectEnglishWords200().then((_) {
+      print("데이터 주입 후 새로고침");
+      _loadStats(); // 화면 갱신
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkPermissions();
       await _loadStats();
     });
+
 
     // 메모/일정/피드백 변경 시마다 통계 새로 로드
     _dataSubscription =
