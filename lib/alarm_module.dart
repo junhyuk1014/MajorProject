@@ -18,8 +18,17 @@ void notificationTapBackground(NotificationResponse response) {
   handleFeedback(response);
 }
 
+// 백그라운드 피드백 핸들러 강화
 @pragma('vm:entry-point')
 Future<void> handleFeedback(NotificationResponse response) async {
+  // 백그라운드 Isolate에서 실행되므로 플러터 엔진 바인딩 초기화 필수
+  WidgetsFlutterBinding.ensureInitialized();
+
+  print( "[Background] 알림 액션 수신: ID=${response.actionId}, Payload=${response.payload}");
+
+  // actionId가 없으면(단순 알림 터치 등) 무시, 버튼 클릭('1', '3', '5')만 처리
+  if (response.actionId == null) return;
+
   await AlarmService().processFeedback(
     response.payload,
     int.tryParse(response.actionId ?? ''),
@@ -91,6 +100,7 @@ class AlarmService {
 
   Future<List<MemoryItem>> _loadItems() async {
     final prefs = await SharedPreferences.getInstance();
+    // 백그라운드 작업 등 외부 변경사항 반영을 위해 reload
     await prefs.reload();
     final jsonList = prefs.getStringList(_storageKey) ?? [];
     return jsonList
@@ -113,9 +123,11 @@ class AlarmService {
     }
   }
 
+  // 피드백 처리 로직 강화
   Future<MemoryItem?> processFeedback(String? itemId, int? score) async {
     if (itemId == null || score == null) return null;
 
+    // 백그라운드 실행 대비 안전장치
     WidgetsFlutterBinding.ensureInitialized();
 
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -126,10 +138,11 @@ class AlarmService {
       const InitializationSettings(android: initializationSettingsAndroid),
     );
 
+    // 기존 알림 제거
     await flutterLocalNotificationsPlugin.cancel(itemId.hashCode);
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.reload();
+    await prefs.reload(); // [중요] 디스크에서 최신 데이터 강제 로드
 
     final jsonList = prefs.getStringList(_storageKey) ?? [];
     List<MemoryItem> items = jsonList
@@ -138,29 +151,39 @@ class AlarmService {
 
     final int index = items.indexWhere((item) => item.id == itemId);
     if (index == -1) {
+      print("항목을 찾을 수 없음: $itemId");
       return null;
     }
 
+    // 알고리즘 적용
     final feedbackModule = FeedbackModule();
     final updatedItem = feedbackModule.schedule(items[index], score);
     items[index] = updatedItem;
 
+    // 유저 프로필 업데이트
     final userProfile = UserProfile();
     await userProfile.load();
     await userProfile.updateUserEf(updatedItem.ef);
 
+    // 저장
     final newJsonList = items.map((item) => jsonEncode(item.toJson())).toList();
     await prefs.setStringList(_storageKey, newJsonList);
 
-    // 대시보드/다른 화면에 "데이터 변경됨" 알리기
+    print("피드백 반영 완료: $itemId, Score: $score, Next: ${updatedItem.nextReviewDate}");
+
+    // 대시보드/다른 화면에 "데이터 변경됨" 알리기 (앱이 켜져있을 경우 동작)
     AlarmService.dataUpdateStream.add(null);
 
+    // 다음 알림 예약
+    // 백그라운드 환경에서는 타임존이 초기화 안 되어있을 수 있으므로 다시 초기화
     tz.initializeTimeZones();
     try {
       final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
       final String timeZoneName = tzInfo.identifier;
       tz.setLocalLocation(tz.getLocation(timeZoneName));
-    } catch (e) {}
+    } catch (e) {
+      print("타임존 재설정 오류(무시 가능): $e");
+    }
 
     if (updatedItem.nextReviewDate.isAfter(DateTime.now())) {
       await flutterLocalNotificationsPlugin.zonedSchedule(
@@ -276,7 +299,6 @@ class AlarmService {
     await _saveItems(items);
     await _scheduleNotification(itemToSave);
 
-    // 메모 저장 시에도 대시보드 갱신 알림
     AlarmService.dataUpdateStream.add(null);
   }
 
@@ -287,7 +309,6 @@ class AlarmService {
     await _saveItems(items);
     await _cancelNotification(targetId);
 
-    // 메모 삭제 시에도 대시보드 갱신 알림
     AlarmService.dataUpdateStream.add(null);
   }
 
@@ -311,7 +332,6 @@ class AlarmService {
     await _saveItems(items);
     await _scheduleNotification(itemToSave);
 
-    // 일정 저장 시에도 대시보드 갱신 알림
     AlarmService.dataUpdateStream.add(null);
   }
 
@@ -322,7 +342,6 @@ class AlarmService {
     await _saveItems(items);
     await _cancelNotification(targetId);
 
-    // 일정 삭제 시에도 대시보드 갱신 알림
     AlarmService.dataUpdateStream.add(null);
   }
 }
