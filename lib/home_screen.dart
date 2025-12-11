@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart';
-
+// import 'test_logic.dart'; // 데이터 주입 로직이 필요 없다면 주석/삭제
 import 'calendar_screen.dart';
 import 'memo_screen.dart';
 import 'memory_item.dart';
@@ -18,7 +18,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   bool _isStatsLoading = true;
@@ -30,36 +30,51 @@ class _HomeScreenState extends State<HomeScreen> {
   List<_CategoryStat> _memoStats = [];
   List<_CategoryStat> _eventStats = [];
 
-  // AlarmService에서 보내는 데이터 변경 알림을 구독하기 위한 필드
+  // 접기/펼치기 상태 관리 변수
+  bool _isMemoExpanded = false;
+  bool _isEventExpanded = false;
+
   StreamSubscription<void>? _dataSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // 참고: 테스트 데이터 주입이 필요하다면 주석 해제
+    // injectEnglishWords200().then((_) {
+    //   _loadStats();
+    // });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkPermissions();
       await _loadStats();
     });
 
-    // 메모/일정/피드백 변경 시마다 통계 새로 로드
     _dataSubscription =
         AlarmService.dataUpdateStream.stream.listen((_) => _loadStats());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dataSubscription?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print("앱이 활성화(Resumed) 되었습니다. 데이터를 갱신합니다.");
+      _loadStats();
+    }
+  }
+
   Future<void> _checkPermissions() async {
-    // 1. 알림 권한 (Android 13+)
     if (await Permission.notification.isDenied) {
       await Permission.notification.request();
     }
 
-    // 2. 스케줄 및 리마인더 권한 (Android 12+)
     var alarmStatus = await Permission.scheduleExactAlarm.status;
 
     if (alarmStatus.isDenied) {
@@ -99,6 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadStats() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
     final jsonList = prefs.getStringList('memory_items') ?? [];
 
     final items =
@@ -109,30 +126,26 @@ class _HomeScreenState extends State<HomeScreen> {
     if (items.isEmpty) {
       avgEf = 2.0;
     } else {
-      avgEf =
-          items.map((i) => i.ef).fold(0.0, (a, b) => a + b) / items.length;
+      avgEf = items.map((i) => i.ef).fold(0.0, (a, b) => a + b) / items.length;
     }
 
-    // EF(1.3~3.0 가정)를 0~100%로 매핑
     const minEf = 1.3;
     const maxEf = 3.0;
     double percent = ((avgEf - minEf) / (maxEf - minEf));
     if (percent.isNaN || percent.isInfinite) percent = 0.0;
     percent = (percent.clamp(0.0, 1.0)) * 100.0;
 
-    // 메모 / 일정 분리
     final memoItems = items.where((i) => i.id.startsWith('MEMO_')).toList();
     final eventItems = items.where((i) => i.id.startsWith('EVENT_')).toList();
 
-    // "망각 점수" 계산 (EF 낮고, 기한이 지났을수록 점수↑)
     List<_CategoryStat> memoStats = memoItems
         .map((item) => _CategoryStat(
       _extractTitle(item),
       _forgetScore(item),
     ))
         .toList();
+    // 점수 높은 순 정렬
     memoStats.sort((a, b) => b.value.compareTo(a.value));
-    // 🔥 TOP5 제한 제거: 전체 항목 사용
 
     List<_CategoryStat> eventStats = eventItems
         .map((item) => _CategoryStat(
@@ -141,7 +154,6 @@ class _HomeScreenState extends State<HomeScreen> {
     ))
         .toList();
     eventStats.sort((a, b) => b.value.compareTo(a.value));
-    // 🔥 TOP5 제한 제거: 전체 항목 사용
 
     if (!mounted) return;
     setState(() {
@@ -154,7 +166,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// MemoryItem.content 의 첫 줄에서 실제 제목만 뽑아냄
   String _extractTitle(MemoryItem item) {
     final firstLine = item.content.split('\n').first;
     if (firstLine.startsWith('[메모] ')) {
@@ -166,15 +177,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return firstLine;
   }
 
-  /// EF가 낮고, 복습 기한이 지나 있을수록 점수가 커지게 해서
-  /// "많이 망각한" 정도를 대략적으로 표현
   double _forgetScore(MemoryItem item) {
     final now = DateTime.now();
     final overdue = now.isAfter(item.nextReviewDate);
 
-    final base = (3.0 - item.ef).clamp(0.0, 3.0); // EF 낮을수록↑
+    final base = (3.0 - item.ef).clamp(0.0, 3.0);
     final overdueBonus = overdue ? 1.5 : 1.0;
-    final repBonus = 0.1 * item.repetitions; // 자주 복습된 것도 반영
+    final repBonus = 0.1 * item.repetitions;
 
     return (base * overdueBonus) + repBonus;
   }
@@ -213,20 +222,15 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   '대시보드',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(
+                  style:
+                  Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(width: 8),
                 Text(
                   '나의 망각과 암기력 한눈에 보기',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.grey[600],
                   ),
                 ),
@@ -282,7 +286,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: _buildPieChart(_memoStats),
                         ),
                         const SizedBox(height: 8),
-                        _buildCategoryLegend(_memoStats),
+                        // 접기/펼치기 기능이 적용된 레전드
+                        _buildExpandableLegend(
+                          _memoStats,
+                          _isMemoExpanded,
+                              () {
+                            setState(() {
+                              _isMemoExpanded = !_isMemoExpanded;
+                            });
+                          },
+                        ),
                       ],
                     ],
                   ),
@@ -310,7 +323,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: _buildPieChart(_eventStats),
                         ),
                         const SizedBox(height: 8),
-                        _buildCategoryLegend(_eventStats),
+                        // 접기/펼치기 기능이 적용된 레전드
+                        _buildExpandableLegend(
+                          _eventStats,
+                          _isEventExpanded,
+                              () {
+                            setState(() {
+                              _isEventExpanded = !_isEventExpanded;
+                            });
+                          },
+                        ),
                       ],
                     ],
                   ),
@@ -402,9 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// 나의 망각 곡선 vs 기준 곡선 (라인 차트)
   Widget _buildForgettingCurveChart() {
-    // x축: 0~6일, y축: 0~100(기억 유지율 %)
     final userSpots = _buildUserCurveSpots();
     final baseSpots = _buildBaseCurveSpots();
 
@@ -469,22 +489,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<FlSpot> _buildUserCurveSpots() {
-    // EF가 높을수록 천천히 잊는 형태로 대략 근사
     final List<FlSpot> spots = [];
     const int days = 7;
-    // EF가 높을수록 decay rate를 낮춤
     final k = 0.45 * (2.0 / _avgEf.clamp(1.3, 3.0));
 
     for (int d = 0; d < days; d++) {
       final t = d.toDouble();
-      final retention = 100 * (1 / (1 + k * t)); // 간단한 하이퍼볼릭 모델
+      final retention = 100 * (1 / (1 + k * t));
       spots.add(FlSpot(t, retention.clamp(0, 100)));
     }
     return spots;
   }
 
   List<FlSpot> _buildBaseCurveSpots() {
-    // 기준 에빙하우스 곡선 (고정)
     final List<FlSpot> spots = [];
     const int days = 7;
     const double baseK = 0.5;
@@ -496,10 +513,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return spots;
   }
 
-  /// 원그래프 (가장 많이 망각한 항목/일정)
   Widget _buildPieChart(List<_CategoryStat> stats) {
-    final total =
-    stats.fold<double>(0.0, (a, b) => a + b.value);
+    // Top 5만 파이차트에 표시하고 싶으면 여기서 stats를 sublist로 자르면 됩니다.
+    // 여기서는 전체 비율을 보여주되, 너무 많으면 보기 힘들 수 있으므로
+    // 상위 5개만 차트에 표시하도록 수정합니다.
+    final topStats = stats.length > 5 ? stats.take(5).toList() : stats;
+
+    final total = topStats.fold<double>(0.0, (a, b) => a + b.value);
     if (total <= 0) {
       return const Center(
         child: Text(
@@ -522,11 +542,11 @@ class _HomeScreenState extends State<HomeScreen> {
         sectionsSpace: 2,
         centerSpaceRadius: 40,
         sections: [
-          for (int i = 0; i < stats.length; i++)
+          for (int i = 0; i < topStats.length; i++)
             PieChartSectionData(
               color: colors[i % colors.length].withOpacity(0.9),
-              value: stats[i].value,
-              title: '${(stats[i].value / total * 100).round()}%',
+              value: topStats[i].value,
+              title: '${(topStats[i].value / total * 100).round()}%',
               radius: 60,
               titleStyle: const TextStyle(
                 fontSize: 12,
@@ -536,6 +556,50 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  // 확장 가능한 레전드 빌더
+  Widget _buildExpandableLegend(
+      List<_CategoryStat> stats,
+      bool isExpanded,
+      VoidCallback onToggle,
+      ) {
+    const int limit = 5;
+
+    // 데이터가 5개 이하면 더보기 버튼 없이 그냥 표시
+    if (stats.length <= limit) {
+      return _buildCategoryLegend(stats);
+    }
+
+    // 상태에 따라 보여줄 데이터 자르기
+    final visibleStats = isExpanded ? stats : stats.sublist(0, limit);
+
+    return Column(
+      children: [
+        _buildCategoryLegend(visibleStats),
+        const SizedBox(height: 4),
+        TextButton.icon(
+          onPressed: onToggle,
+          icon: Icon(
+            isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+            size: 20,
+            color: Colors.grey[600],
+          ),
+          label: Text(
+            isExpanded ? '접기' : '더보기 (+${stats.length - limit})',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 13,
+            ),
+          ),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ],
     );
   }
 
@@ -560,16 +624,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: 10,
                   height: 10,
                   decoration: BoxDecoration(
+                    // 인덱스가 5를 넘어가면 색상이 반복되도록 처리
                     color: colors[i % colors.length],
                     shape: BoxShape.circle,
                   ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
-                    stats[i].label,
-                    style: const TextStyle(fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          stats[i].label,
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -605,7 +677,6 @@ class _HomeScreenState extends State<HomeScreen> {
       currentIndex: _selectedIndex,
       onTap: (index) {
         setState(() => _selectedIndex = index);
-        // 홈 탭 다시 누르면 통계 리프레시
         if (index == 0) {
           _loadStats();
         }
@@ -635,7 +706,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// 파이차트/리스트에서 쓰는 간단한 카테고리+값 구조
 class _CategoryStat {
   final String label;
   final double value;
