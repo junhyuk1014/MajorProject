@@ -1,3 +1,4 @@
+
 class CalendarEvent {
     final String id;
     final String title;
@@ -6,6 +7,9 @@ class CalendarEvent {
     final DateTime endDate;
     final bool isAllDay;
 
+    // ✅ 추가: 이미지 경로(로컬 파일 경로 등)
+    final String? imagePath;
+
     CalendarEvent({
         required this.id,
         required this.title,
@@ -13,7 +17,29 @@ class CalendarEvent {
         required this.startDate,
         required this.endDate,
         this.isAllDay = false,
+        this.imagePath, // ✅ 추가
     });
+
+    // ✅ 추가: copyWith
+    CalendarEvent copyWith({
+        String? id,
+        String? title,
+        String? description,
+        DateTime? startDate,
+        DateTime? endDate,
+        bool? isAllDay,
+        String? imagePath,
+    }) {
+        return CalendarEvent(
+            id: id ?? this.id,
+            title: title ?? this.title,
+            description: description ?? this.description,
+            startDate: startDate ?? this.startDate,
+            endDate: endDate ?? this.endDate,
+            isAllDay: isAllDay ?? this.isAllDay,
+            imagePath: imagePath ?? this.imagePath, // ✅ 유지/변경
+        );
+    }
 
     Map<String, dynamic> toJson() {
         return {
@@ -23,6 +49,7 @@ class CalendarEvent {
             'startDate': startDate.toIso8601String(),
             'endDate': endDate.toIso8601String(),
             'isAllDay': isAllDay,
+            if (imagePath != null) 'imagePath': imagePath, // ✅ 추가
         };
     }
 
@@ -34,7 +61,7 @@ class CalendarEvent {
             startDate: DateTime.parse(json['startDate']),
             endDate: DateTime.parse(json['endDate']),
             isAllDay: json['isAllDay'] ?? false,
+            imagePath: json['imagePath'], // ✅ 추가
         );
     }
 }
-
