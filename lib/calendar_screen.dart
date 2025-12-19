@@ -1046,7 +1046,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
             localEvents.removeWhere((e) => e.id == eventId);
             await _saveLocalEvents(localEvents);
 
-            await _loadEventsFromGoogle();
+            // UI에서 즉시 제거
+            final Map<DateTime, List<CalendarEvent>> updatedEvents = {};
+            for (var entry in _events.entries) {
+                final filteredList = entry.value.where((e) => e.id != eventId).toList();
+                if (filteredList.isNotEmpty) {
+                    updatedEvents[entry.key] = filteredList;
+                }
+            }
+            
+            setState(() {
+                _events = updatedEvents;
+                _selectedEvents = _selectedDay == null
+                    ? []
+                    : _getEventsForDay(_selectedDay!);
+                _isLoading = false;
+            });
 
             if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
